@@ -1,0 +1,369 @@
+"use client";
+
+import * as React from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { Plus, Trash2, Save, Boxes } from "lucide-react";
+import {
+  createProduct,
+  listCategories,
+  listCollections,
+  updateProduct,
+  type ProductWriteInput,
+} from "@/lib/admin-api";
+import { effectivePrice } from "@/lib/derive";
+import { productFormSchema } from "@/lib/schemas";
+import {
+  METAL_LABEL,
+  METAL_TYPES,
+  STOCK_TYPES,
+  titleCase,
+  type Category,
+  type Collection,
+  type MetalType,
+  type ProductDetail,
+  type ProductStatus,
+  type StockType,
+} from "@/lib/types";
+import { useAsync } from "@/lib/use-async";
+import { formatPrice } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
+import { Field, Input, NativeSelect, Textarea, Label } from "@/components/ui/input";
+import { ToggleField } from "@/components/ui/switch";
+import { toast } from "@/components/ui/toast";
+import { ProductMediaManager } from "./product-media-manager";
+
+interface Stone { type: string; weight: string; quality: string; count: string }
+interface Cert { key: string; value: string }
+
+interface FormState {
+  name: string;
+  sku: string;
+  metal_type: MetalType;
+  category_id: string;
+  collection_id: string;
+  description: string;
+  price: string;
+  discount_percent: string;
+  purity: string;
+  stock_type: StockType;
+  status: ProductStatus;
+  gross_weight: string;
+  net_weight: string;
+  available_sizes: string;
+  size_unit: string;
+  care_instruction: string;
+  is_featured: boolean;
+  tags: string;
+  stones: Stone[];
+  certs: Cert[];
+}
+
+function toState(p?: ProductDetail): FormState {
+  if (!p)
+    return {
+      name: "", sku: "", metal_type: "silver", category_id: "", collection_id: "",
+      description: "", price: "", discount_percent: "0", purity: "925 Sterling",
+      stock_type: "quantity", status: "draft", gross_weight: "", net_weight: "",
+      available_sizes: "", size_unit: "", care_instruction: "", is_featured: false,
+      tags: "", stones: [], certs: [],
+    };
+  return {
+    name: p.name,
+    sku: p.sku,
+    metal_type: p.metal_type,
+    category_id: p.category?.id ?? "",
+    collection_id: p.collection?.id ?? "",
+    description: p.description,
+    price: String(p.price),
+    discount_percent: String(p.discount_percent),
+    purity: p.purity,
+    stock_type: p.stock_type,
+    status: p.status,
+    gross_weight: p.gross_weight != null ? String(p.gross_weight) : "",
+    net_weight: p.net_weight != null ? String(p.net_weight) : "",
+    available_sizes: p.available_sizes,
+    size_unit: p.size_unit,
+    care_instruction: p.care_instruction,
+    is_featured: p.is_featured,
+    tags: p.tags.join(", "),
+    stones: p.stone_details.map((s) => ({ type: s.type, weight: s.weight, quality: s.quality, count: String(s.count) })),
+    certs: Object.entries(p.certificate_details).map(([key, value]) => ({ key, value })),
+  };
+}
+
+type Errors = Partial<Record<string, string>>;
+
+export function ProductForm({
+  product,
+  onSaved,
+}: {
+  product?: ProductDetail;
+  onSaved?: () => void;
+}) {
+  const router = useRouter();
+  const isEdit = !!product;
+  const [form, setForm] = React.useState<FormState>(() => toState(product));
+  const [errors, setErrors] = React.useState<Errors>({});
+  const [saving, setSaving] = React.useState(false);
+
+  const cats = useAsync<Category[]>(() => listCategories(), []);
+  const cols = useAsync<Collection[]>(() => listCollections(), []);
+
+  function set<K extends keyof FormState>(k: K, v: FormState[K]) {
+    setForm((f) => ({ ...f, [k]: v }));
+  }
+
+  const priceNum = Number(form.price) || 0;
+  const discNum = Number(form.discount_percent) || 0;
+  const effective = effectivePrice(priceNum, discNum);
+
+  function buildPayload(): ProductWriteInput {
+    return {
+      name: form.name,
+      price: Number(form.price),
+      metal_type: form.metal_type,
+      sku: form.sku.trim() || undefined,
+      description: form.description,
+      category_id: form.category_id || null,
+      collection_id: form.collection_id || null,
+      discount_percent: Number(form.discount_percent) || 0,
+      stock_type: form.stock_type,
+      status: isEdit ? form.status : undefined,
+      purity: form.purity,
+      gross_weight: form.gross_weight ? Number(form.gross_weight) : null,
+      net_weight: form.net_weight ? Number(form.net_weight) : null,
+      stone_details: form.stones
+        .filter((s) => s.type.trim())
+        .map((s) => ({ type: s.type, weight: s.weight, quality: s.quality, count: Number(s.count) || 0 })),
+      certificate_details: Object.fromEntries(
+        form.certs.filter((c) => c.key.trim()).map((c) => [c.key.trim(), c.value]),
+      ),
+      available_sizes: form.available_sizes,
+      size_unit: form.size_unit,
+      care_instruction: form.care_instruction,
+      is_featured: form.is_featured,
+      tags: form.tags.split(",").map((t) => t.trim()).filter(Boolean),
+    };
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const parsed = productFormSchema.safeParse(buildPayload());
+    if (!parsed.success) {
+      const fe = parsed.error.flatten().fieldErrors as Record<string, string[]>;
+      const next: Errors = {};
+      for (const [k, v] of Object.entries(fe)) if (v?.[0]) next[k] = v[0];
+      setErrors(next);
+      toast.error("Please fix the highlighted fields");
+      return;
+    }
+    setErrors({});
+    setSaving(true);
+    try {
+      if (isEdit) {
+        await updateProduct(product!.id, buildPayload());
+        toast.success("Product updated");
+        onSaved?.();
+        router.push("/products");
+      } else {
+        const created = await createProduct(buildPayload());
+        toast.success(`"${created.name}" created as draft — add images and publish`);
+        router.push(`/products/${created.id}`);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not save product");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // repeatable helpers
+  const addStone = () => set("stones", [...form.stones, { type: "", weight: "", quality: "", count: "1" }]);
+  const setStone = (i: number, k: keyof Stone, v: string) =>
+    setForm((f) => { const s = f.stones.slice(); s[i] = { ...s[i], [k]: v }; return { ...f, stones: s }; });
+  const rmStone = (i: number) => set("stones", form.stones.filter((_, x) => x !== i));
+
+  const addCert = () => set("certs", [...form.certs, { key: "", value: "" }]);
+  const setCert = (i: number, k: keyof Cert, v: string) =>
+    setForm((f) => { const c = f.certs.slice(); c[i] = { ...c[i], [k]: v }; return { ...f, certs: c }; });
+  const rmCert = (i: number) => set("certs", form.certs.filter((_, x) => x !== i));
+
+  return (
+    <form onSubmit={handleSubmit} className="grid gap-6 lg:grid-cols-3">
+      <div className="space-y-6 lg:col-span-2">
+        <Card>
+          <CardHeader><CardTitle>Details</CardTitle></CardHeader>
+          <CardBody className="space-y-4">
+            <Field label="Name" htmlFor="name" required error={errors.name}>
+              <Input id="name" value={form.name} invalid={!!errors.name} onChange={(e) => set("name", e.target.value)} placeholder="Celestial Stack Ring" />
+            </Field>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Metal type" htmlFor="metal" required>
+                <NativeSelect id="metal" value={form.metal_type} onChange={(e) => set("metal_type", e.target.value as MetalType)}>
+                  {METAL_TYPES.map((m) => <option key={m} value={m}>{METAL_LABEL[m]}</option>)}
+                </NativeSelect>
+              </Field>
+              <Field label="Purity" htmlFor="purity">
+                <Input id="purity" value={form.purity} onChange={(e) => set("purity", e.target.value)} placeholder="925 Sterling" />
+              </Field>
+              <Field label="Category" htmlFor="category">
+                <NativeSelect id="category" value={form.category_id} onChange={(e) => set("category_id", e.target.value)}>
+                  <option value="">— None —</option>
+                  {(cats.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </NativeSelect>
+              </Field>
+              <Field label="Collection" htmlFor="collection">
+                <NativeSelect id="collection" value={form.collection_id} onChange={(e) => set("collection_id", e.target.value)}>
+                  <option value="">— None —</option>
+                  {(cols.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </NativeSelect>
+              </Field>
+            </div>
+            <Field label="Description" htmlFor="description">
+              <Textarea id="description" value={form.description} onChange={(e) => set("description", e.target.value)} placeholder="A short, evocative description…" />
+            </Field>
+            <Field label="SKU" htmlFor="sku" hint={isEdit ? undefined : "Auto-generated if left blank"}>
+              <Input id="sku" value={form.sku} onChange={(e) => set("sku", e.target.value)} disabled={isEdit} placeholder="SOIS-SLV-0001" />
+            </Field>
+          </CardBody>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle>Pricing</CardTitle></CardHeader>
+          <CardBody className="grid gap-4 sm:grid-cols-2">
+            <Field label="Price (₹)" htmlFor="price" required error={errors.price}>
+              <Input id="price" inputMode="numeric" value={form.price} invalid={!!errors.price} onChange={(e) => set("price", e.target.value)} placeholder="1499" />
+            </Field>
+            <Field label="Discount (%)" htmlFor="discount" error={errors.discount_percent} hint={`Effective: ${formatPrice(effective)}`}>
+              <Input id="discount" inputMode="numeric" value={form.discount_percent} invalid={!!errors.discount_percent} onChange={(e) => set("discount_percent", e.target.value)} placeholder="0" />
+            </Field>
+          </CardBody>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle>Specifications</CardTitle></CardHeader>
+          <CardBody className="grid gap-4 sm:grid-cols-2">
+            <Field label="Gross weight (g)" htmlFor="gw"><Input id="gw" inputMode="decimal" value={form.gross_weight} onChange={(e) => set("gross_weight", e.target.value)} /></Field>
+            <Field label="Net weight (g)" htmlFor="nw"><Input id="nw" inputMode="decimal" value={form.net_weight} onChange={(e) => set("net_weight", e.target.value)} /></Field>
+            <Field label="Available sizes" htmlFor="sizes" hint="Comma-separated"><Input id="sizes" value={form.available_sizes} onChange={(e) => set("available_sizes", e.target.value)} placeholder="6,7,8,9" /></Field>
+            <Field label="Size unit" htmlFor="unit"><Input id="unit" value={form.size_unit} onChange={(e) => set("size_unit", e.target.value)} placeholder="US" /></Field>
+            <Field label="Tags" htmlFor="tags" hint="Comma-separated" className="sm:col-span-2"><Input id="tags" value={form.tags} onChange={(e) => set("tags", e.target.value)} placeholder="new, bestseller" /></Field>
+            <Field label="Care instructions" htmlFor="care" className="sm:col-span-2"><Textarea id="care" value={form.care_instruction} onChange={(e) => set("care_instruction", e.target.value)} /></Field>
+          </CardBody>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Stones</CardTitle>
+            <Button type="button" variant="secondary" size="sm" onClick={addStone}><Plus className="size-4" />Add stone</Button>
+          </CardHeader>
+          <CardBody className="space-y-3">
+            {form.stones.length === 0 && <p className="text-sm text-faint">No stones on this piece.</p>}
+            {form.stones.map((s, i) => (
+              <div key={i} className="grid grid-cols-2 gap-2 sm:grid-cols-[1fr_1fr_1fr_auto_auto]">
+                <Input value={s.type} onChange={(e) => setStone(i, "type", e.target.value)} placeholder="Type (CZ)" />
+                <Input value={s.weight} onChange={(e) => setStone(i, "weight", e.target.value)} placeholder="Weight" />
+                <Input value={s.quality} onChange={(e) => setStone(i, "quality", e.target.value)} placeholder="Quality" />
+                <Input className="w-16" inputMode="numeric" value={s.count} onChange={(e) => setStone(i, "count", e.target.value)} placeholder="Qty" />
+                <Button type="button" variant="ghost" size="icon" onClick={() => rmStone(i)}><Trash2 className="size-4 text-faint" /></Button>
+              </div>
+            ))}
+          </CardBody>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Certificate details</CardTitle>
+            <Button type="button" variant="secondary" size="sm" onClick={addCert}><Plus className="size-4" />Add row</Button>
+          </CardHeader>
+          <CardBody className="space-y-3">
+            {form.certs.length === 0 && <p className="text-sm text-faint">No certificate details.</p>}
+            {form.certs.map((c, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <Input value={c.key} onChange={(e) => setCert(i, "key", e.target.value)} placeholder="Label (BIS)" className="flex-1" />
+                <Input value={c.value} onChange={(e) => setCert(i, "value", e.target.value)} placeholder="Value (Hallmarked)" className="flex-1" />
+                <Button type="button" variant="ghost" size="icon" onClick={() => rmCert(i)}><Trash2 className="size-4 text-faint" /></Button>
+              </div>
+            ))}
+          </CardBody>
+        </Card>
+
+        {isEdit && (
+          <Card>
+            <CardHeader><CardTitle>Images</CardTitle></CardHeader>
+            <CardBody>
+              <ProductMediaManager productId={product!.id} media={product!.media} onChanged={() => onSaved?.()} />
+            </CardBody>
+          </Card>
+        )}
+      </div>
+
+      {/* Sidebar */}
+      <div className="space-y-6">
+        <Card>
+          <CardHeader><CardTitle>Preview</CardTitle></CardHeader>
+          <CardBody className="space-y-3 text-sm">
+            <Row label="SKU"><code className="rounded bg-surface px-1.5 py-0.5 text-xs font-semibold">{form.sku || (isEdit ? "—" : "Auto")}</code></Row>
+            <Row label="Effective price"><span className="font-semibold">{formatPrice(effective)}</span></Row>
+            {discNum > 0 && <Row label="List price"><span className="text-faint line-through">{formatPrice(priceNum)}</span></Row>}
+            <Row label="Featured"><span className={form.is_featured ? "font-semibold text-forest" : "text-faint"}>{form.is_featured ? "Yes" : "No"}</span></Row>
+          </CardBody>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle>Availability</CardTitle></CardHeader>
+          <CardBody className="space-y-4">
+            {isEdit ? (
+              <>
+                <Field label="Status" htmlFor="status">
+                  <NativeSelect id="status" value={form.status} onChange={(e) => set("status", e.target.value as ProductStatus)}>
+                    {(["draft", "active", "out_of_stock", "archived"] as ProductStatus[]).map((s) => <option key={s} value={s}>{titleCase(s)}</option>)}
+                  </NativeSelect>
+                </Field>
+                <div className="rounded-lg border border-line bg-surface p-3 text-sm">
+                  <p className="font-semibold text-ink">Stock: {product!.qty}</p>
+                  <p className="mt-0.5 text-xs text-muted">
+                    Quantity is managed through the stock ledger, not here.
+                  </p>
+                  <Link href="/stock" className="mt-1.5 inline-flex items-center gap-1 text-xs font-semibold text-forest hover:underline">
+                    <Boxes className="size-3.5" />Adjust stock
+                  </Link>
+                </div>
+              </>
+            ) : (
+              <p className="rounded-lg border border-dashed border-line-strong p-3 text-sm text-muted">
+                New products are created as a <strong>draft</strong> with zero stock.
+                Save first, then add images, publish, and receive stock via a
+                purchase order.
+              </p>
+            )}
+            <Field label="Stock type" htmlFor="stocktype">
+              <NativeSelect id="stocktype" value={form.stock_type} onChange={(e) => set("stock_type", e.target.value as StockType)}>
+                {STOCK_TYPES.map((s) => <option key={s} value={s}>{titleCase(s)}</option>)}
+              </NativeSelect>
+            </Field>
+            <ToggleField label="Featured product" checked={form.is_featured} onCheckedChange={(v) => set("is_featured", v)} />
+          </CardBody>
+        </Card>
+
+        <div className="flex flex-col gap-2">
+          <Button type="submit" loading={saving}>
+            <Save className="size-4" />{isEdit ? "Save changes" : "Create product"}
+          </Button>
+          <Button type="button" variant="secondary" onClick={() => router.push("/products")}>Cancel</Button>
+        </div>
+      </div>
+    </form>
+  );
+}
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-muted">{label}</span>
+      {children}
+    </div>
+  );
+}

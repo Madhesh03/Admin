@@ -1,26 +1,46 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* ---------------------------------------------------------------------------
+   SOIS design tokens (from the storefront brand — see brief §7)
+--------------------------------------------------------------------------- */
+@theme {
+  --color-canvas: #fafafa; /* page background */
+  --color-surface: #f3f4f6; /* subtle raised surface */
+  --color-white: #ffffff;
+
+  --color-ink: #0a0a0a; /* primary text */
+  --color-muted: #4b5563; /* secondary text */
+  --color-faint: #9ca3af; /* tertiary text / placeholders */
+  --color-silver: #8891a4;
+
+  --color-forest: #115e59; /* primary / brand */
+  --color-forest-dark: #0e4d49; /* hover */
+  --color-sage: #d1fae5; /* soft fills / badges */
+  --color-sage-dark: #99f6e4;
+
+  --color-line: #e8e8e8; /* subtle borders */
+  --color-line-strong: #d1d5db;
+
+  --font-sans:
+    var(--font-jakarta), ui-sans-serif, system-ui, -apple-system, sans-serif;
+
+  --radius-lg: 0.625rem;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  height: 100%;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  min-height: 100%;
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Thin, brand-tinted scrollbars for the desktop-first admin */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) transparent;
 }

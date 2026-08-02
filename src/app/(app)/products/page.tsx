@@ -20,7 +20,7 @@ import {
 } from "@/lib/types";
 import { listCategories } from "@/lib/admin-api";
 import { useAsync, useDebouncedValue } from "@/lib/use-async";
-import { cn, formatPrice } from "@/lib/utils";
+import { cn, formatPrice, preferStableSrc } from "@/lib/utils";
 import { useAuth } from "@/components/auth-provider";
 import { RequirePermission } from "@/components/permission-gate";
 import { PageHeader } from "@/components/layout/page-header";
@@ -159,7 +159,7 @@ function ProductsInner() {
                   <Tr key={p.id} clickable onClick={() => router.push(`/products/${p.id}`)}>
                     <Td>
                       <div className="flex items-center gap-3">
-                        <Thumb src={p.thumbnail_key} alt={p.name} className="size-11 shrink-0" />
+                        <Thumb src={preferStableSrc(p.thumbnail_key, p.thumbnail_url)} alt={p.name} className="size-11 shrink-0" />
                         <div className="min-w-0">
                           <p className="flex items-center gap-1.5 truncate font-semibold text-ink">
                             {p.name}

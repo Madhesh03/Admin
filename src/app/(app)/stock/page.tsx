@@ -14,7 +14,7 @@ import { stockLevel } from "@/lib/derive";
 import { adjustStockSchema } from "@/lib/schemas";
 import { METAL_LABEL, titleCase, type ProductList, type StockLedgerEntry } from "@/lib/types";
 import { useAsync, useDebouncedValue } from "@/lib/use-async";
-import { cn, formatDateTime, formatPrice } from "@/lib/utils";
+import { cn, formatDateTime, formatPrice, preferStableSrc } from "@/lib/utils";
 import { useAuth } from "@/components/auth-provider";
 import { RequirePermission } from "@/components/permission-gate";
 import { PageHeader } from "@/components/layout/page-header";
@@ -137,7 +137,7 @@ function LevelsTab({
                 <Tr key={p.id}>
                   <Td>
                     <div className="flex items-center gap-3">
-                      <Thumb src={p.thumbnail_key} alt={p.name} className="size-10 shrink-0" />
+                      <Thumb src={preferStableSrc(p.thumbnail_key, p.thumbnail_url)} alt={p.name} className="size-10 shrink-0" />
                       <div className="min-w-0">
                         <Link href={`/products/${p.id}`} className="truncate font-semibold text-ink hover:text-forest">{p.name}</Link>
                         <p className="truncate text-xs text-faint">{p.sku} · {p.stock_type}</p>

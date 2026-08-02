@@ -146,6 +146,8 @@ export interface ProductMedia {
   id: string;
   media_type: MediaType;
   s3_key: string;
+  /** Presigned GET URL for direct <img> use (real backend); null if S3 unset. */
+  view_url?: string | null;
   file_name: string;
   mime_type: string;
   alt_text: string;
@@ -178,7 +180,9 @@ export interface ProductList {
   status: ProductStatus;
   is_featured: boolean;
   thumbnail_key: string;
-  primary_image: { s3_key: string; alt_text: string } | null;
+  /** Presigned GET URL for thumbnail_key (real backend); null if S3 unset. */
+  thumbnail_url?: string | null;
+  primary_image: { s3_key: string; view_url?: string | null; alt_text: string } | null;
   created_at: string;
 }
 
@@ -209,6 +213,8 @@ export interface ProductDetail {
   is_featured: boolean;
   tags: string[];
   thumbnail_key: string;
+  /** Presigned GET URL for thumbnail_key (real backend); null if S3 unset. */
+  thumbnail_url?: string | null;
   media: ProductMedia[];
   created_at: string;
   updated_at: string;

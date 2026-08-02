@@ -11,6 +11,7 @@ import {
   updateProduct,
   type ProductWriteInput,
 } from "@/lib/admin-api";
+import { uploadProductImage } from "@/lib/media-upload";
 import { effectivePrice } from "@/lib/derive";
 import { productFormSchema } from "@/lib/schemas";
 import {
@@ -33,6 +34,7 @@ import { Field, Input, NativeSelect, Textarea, Label } from "@/components/ui/inp
 import { ToggleField } from "@/components/ui/switch";
 import { toast } from "@/components/ui/toast";
 import { ProductMediaManager } from "./product-media-manager";
+import { PendingImagePicker, type PendingImage } from "./pending-image-picker";
 
 interface Stone { type: string; weight: string; quality: string; count: string }
 interface Cert { key: string; value: string }
@@ -107,6 +109,8 @@ export function ProductForm({
   const [form, setForm] = React.useState<FormState>(() => toState(product));
   const [errors, setErrors] = React.useState<Errors>({});
   const [saving, setSaving] = React.useState(false);
+  // Images chosen on the *new* page — held locally, uploaded after create.
+  const [pending, setPending] = React.useState<PendingImage[]>([]);
 
   const cats = useAsync<Category[]>(() => listCategories(), []);
   const cols = useAsync<Collection[]>(() => listCollections(), []);
@@ -169,7 +173,31 @@ export function ProductForm({
         router.push("/products");
       } else {
         const created = await createProduct(buildPayload());
-        toast.success(`"${created.name}" created as draft — add images and publish`);
+        if (pending.length) {
+          // Primary first so it wins the `is_primary` slot on the backend.
+          const ordered = [...pending].sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary));
+          let failed = 0;
+          for (const p of ordered) {
+            try {
+              await uploadProductImage({
+                productId: created.id,
+                blob: p.file,
+                fileName: p.file.name,
+                mime: p.file.type || "application/octet-stream",
+                isPrimary: p.isPrimary,
+              });
+            } catch {
+              failed++;
+            }
+          }
+          if (failed) {
+            toast.error(`Product created, but ${failed} image${failed > 1 ? "s" : ""} failed to upload — retry below`);
+          } else {
+            toast.success(`"${created.name}" created with ${pending.length} image${pending.length > 1 ? "s" : ""}`);
+          }
+        } else {
+          toast.success(`"${created.name}" created as draft — add images and publish`);
+        }
         router.push(`/products/${created.id}`);
       }
     } catch (err) {
@@ -191,7 +219,17 @@ export function ProductForm({
   const rmCert = (i: number) => set("certs", form.certs.filter((_, x) => x !== i));
 
   return (
-    <form onSubmit={handleSubmit} className="grid gap-6 lg:grid-cols-3">
+    <form
+      onSubmit={handleSubmit}
+      // Enter in a single-line field must not submit the whole form — too easy
+      // to fire accidentally on a long product form. Submit is the button only.
+      onKeyDown={(e) => {
+        if (e.key === "Enter" && e.target instanceof HTMLElement && e.target.tagName === "INPUT") {
+          e.preventDefault();
+        }
+      }}
+      className="grid gap-6 lg:grid-cols-3"
+    >
       <div className="space-y-6 lg:col-span-2">
         <Card>
           <CardHeader><CardTitle>Details</CardTitle></CardHeader>
@@ -290,14 +328,16 @@ export function ProductForm({
           </CardBody>
         </Card>
 
-        {isEdit && (
-          <Card>
-            <CardHeader><CardTitle>Images</CardTitle></CardHeader>
-            <CardBody>
+        <Card>
+          <CardHeader><CardTitle>Images</CardTitle></CardHeader>
+          <CardBody>
+            {isEdit ? (
               <ProductMediaManager productId={product!.id} media={product!.media} onChanged={() => onSaved?.()} />
-            </CardBody>
-          </Card>
-        )}
+            ) : (
+              <PendingImagePicker value={pending} onChange={setPending} disabled={saving} />
+            )}
+          </CardBody>
+        </Card>
       </div>
 
       {/* Sidebar */}
@@ -335,8 +375,8 @@ export function ProductForm({
             ) : (
               <p className="rounded-lg border border-dashed border-line-strong p-3 text-sm text-muted">
                 New products are created as a <strong>draft</strong> with zero stock.
-                Save first, then add images, publish, and receive stock via a
-                purchase order.
+                Add images below — they upload automatically on save. Publish and
+                receive stock via a purchase order next.
               </p>
             )}
             <Field label="Stock type" htmlFor="stocktype">

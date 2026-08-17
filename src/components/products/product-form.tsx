@@ -35,9 +35,12 @@ import { ToggleField } from "@/components/ui/switch";
 import { toast } from "@/components/ui/toast";
 import { ProductMediaManager } from "./product-media-manager";
 import { PendingImagePicker, type PendingImage } from "./pending-image-picker";
+import { ProductSizeStock } from "./product-size-stock";
 
 interface Stone { type: string; weight: string; quality: string; count: string }
 interface Cert { key: string; value: string }
+/** One editable variation row (WooCommerce-style): a value + its own SKU/price/weight. */
+interface Variant { size: string; sku: string; price: string; weight: string; active: boolean }
 
 interface FormState {
   name: string;
@@ -53,8 +56,12 @@ interface FormState {
   status: ProductStatus;
   gross_weight: string;
   net_weight: string;
-  available_sizes: string;
+  length_mm: string;
+  width_mm: string;
+  height_mm: string;
+  variant_label: string;
   size_unit: string;
+  variants: Variant[];
   care_instruction: string;
   is_featured: boolean;
   tags: string;
@@ -68,7 +75,9 @@ function toState(p?: ProductDetail): FormState {
       name: "", sku: "", metal_type: "silver", category_id: "", collection_id: "",
       description: "", price: "", discount_percent: "0", purity: "925 Sterling",
       stock_type: "quantity", status: "draft", gross_weight: "", net_weight: "",
-      available_sizes: "", size_unit: "", care_instruction: "", is_featured: false,
+      length_mm: "", width_mm: "", height_mm: "",
+      variant_label: "", size_unit: "", variants: [],
+      care_instruction: "", is_featured: false,
       tags: "", stones: [], certs: [],
     };
   return {
@@ -85,8 +94,18 @@ function toState(p?: ProductDetail): FormState {
     status: p.status,
     gross_weight: p.gross_weight != null ? String(p.gross_weight) : "",
     net_weight: p.net_weight != null ? String(p.net_weight) : "",
-    available_sizes: p.available_sizes,
+    length_mm: p.length_mm != null ? String(p.length_mm) : "",
+    width_mm: p.width_mm != null ? String(p.width_mm) : "",
+    height_mm: p.height_mm != null ? String(p.height_mm) : "",
+    variant_label: p.variant_label,
     size_unit: p.size_unit,
+    variants: p.size_stock.map((v) => ({
+      size: v.size,
+      sku: v.sku,
+      price: v.price != null ? String(v.price) : "",
+      weight: v.net_weight != null ? String(v.net_weight) : "",
+      active: v.is_active,
+    })),
     care_instruction: p.care_instruction,
     is_featured: p.is_featured,
     tags: p.tags.join(", "),
@@ -124,6 +143,20 @@ export function ProductForm({
   const effective = effectivePrice(priceNum, discNum);
 
   function buildPayload(): ProductWriteInput {
+    // Variations are the source of truth for which sizes exist. When there are
+    // none, send available_sizes:"" so the product is treated as unsized.
+    const variants = form.variants.filter((v) => v.size.trim());
+    const variationPayload = variants.length
+      ? {
+          variations: variants.map((v) => ({
+            size: v.size.trim(),
+            sku: v.sku.trim(),
+            price: v.price.trim() ? Number(v.price) : null,
+            net_weight: v.weight.trim() ? Number(v.weight) : null,
+            is_active: v.active,
+          })),
+        }
+      : { available_sizes: "" };
     return {
       name: form.name,
       price: Number(form.price),
@@ -138,14 +171,18 @@ export function ProductForm({
       purity: form.purity,
       gross_weight: form.gross_weight ? Number(form.gross_weight) : null,
       net_weight: form.net_weight ? Number(form.net_weight) : null,
+      length_mm: form.length_mm ? Number(form.length_mm) : null,
+      width_mm: form.width_mm ? Number(form.width_mm) : null,
+      height_mm: form.height_mm ? Number(form.height_mm) : null,
       stone_details: form.stones
         .filter((s) => s.type.trim())
         .map((s) => ({ type: s.type, weight: s.weight, quality: s.quality, count: Number(s.count) || 0 })),
       certificate_details: Object.fromEntries(
         form.certs.filter((c) => c.key.trim()).map((c) => [c.key.trim(), c.value]),
       ),
-      available_sizes: form.available_sizes,
+      variant_label: form.variant_label,
       size_unit: form.size_unit,
+      ...variationPayload,
       care_instruction: form.care_instruction,
       is_featured: form.is_featured,
       tags: form.tags.split(",").map((t) => t.trim()).filter(Boolean),
@@ -198,7 +235,7 @@ export function ProductForm({
         } else {
           toast.success(`"${created.name}" created as draft — add images and publish`);
         }
-        router.push(`/products/${created.id}`);
+        router.push("/products");
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not save product");
@@ -217,6 +254,12 @@ export function ProductForm({
   const setCert = (i: number, k: keyof Cert, v: string) =>
     setForm((f) => { const c = f.certs.slice(); c[i] = { ...c[i], [k]: v }; return { ...f, certs: c }; });
   const rmCert = (i: number) => set("certs", form.certs.filter((_, x) => x !== i));
+
+  const addVariant = () => set("variants", [...form.variants, { size: "", sku: "", price: "", weight: "", active: true }]);
+  const setVariant = (i: number, k: keyof Variant, v: string | boolean) =>
+    setForm((f) => { const rows = f.variants.slice(); rows[i] = { ...rows[i], [k]: v }; return { ...f, variants: rows }; });
+  const rmVariant = (i: number) => set("variants", form.variants.filter((_, x) => x !== i));
+  const axisLabel = form.variant_label.trim() || "Size";
 
   return (
     <form
@@ -285,12 +328,72 @@ export function ProductForm({
           <CardBody className="grid gap-4 sm:grid-cols-2">
             <Field label="Gross weight (g)" htmlFor="gw"><Input id="gw" inputMode="decimal" value={form.gross_weight} onChange={(e) => set("gross_weight", e.target.value)} /></Field>
             <Field label="Net weight (g)" htmlFor="nw"><Input id="nw" inputMode="decimal" value={form.net_weight} onChange={(e) => set("net_weight", e.target.value)} /></Field>
-            <Field label="Available sizes" htmlFor="sizes" hint="Comma-separated"><Input id="sizes" value={form.available_sizes} onChange={(e) => set("available_sizes", e.target.value)} placeholder="6,7,8,9" /></Field>
-            <Field label="Size unit" htmlFor="unit"><Input id="unit" value={form.size_unit} onChange={(e) => set("size_unit", e.target.value)} placeholder="US" /></Field>
+            <div className="grid grid-cols-3 gap-4 sm:col-span-2">
+              <Field label="Length (mm)" htmlFor="len"><Input id="len" inputMode="decimal" value={form.length_mm} onChange={(e) => set("length_mm", e.target.value)} placeholder="18" /></Field>
+              <Field label="Width (mm)" htmlFor="wid"><Input id="wid" inputMode="decimal" value={form.width_mm} onChange={(e) => set("width_mm", e.target.value)} placeholder="6" /></Field>
+              <Field label="Height (mm)" htmlFor="hgt"><Input id="hgt" inputMode="decimal" value={form.height_mm} onChange={(e) => set("height_mm", e.target.value)} placeholder="3" /></Field>
+            </div>
             <Field label="Tags" htmlFor="tags" hint="Comma-separated" className="sm:col-span-2"><Input id="tags" value={form.tags} onChange={(e) => set("tags", e.target.value)} placeholder="new, bestseller" /></Field>
             <Field label="Care instructions" htmlFor="care" className="sm:col-span-2"><Textarea id="care" value={form.care_instruction} onChange={(e) => set("care_instruction", e.target.value)} /></Field>
           </CardBody>
         </Card>
+
+        <Card>
+          <CardHeader>
+            <div>
+              <CardTitle>Variations</CardTitle>
+              <p className="mt-0.5 text-xs text-faint">
+                For sized pieces — rings, chains (by length), bangles (by diameter).
+                Each variation carries its own SKU, price and weight.
+              </p>
+            </div>
+            <Button type="button" variant="secondary" size="sm" onClick={addVariant}><Plus className="size-4" />Add variation</Button>
+          </CardHeader>
+          <CardBody className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Variant name" htmlFor="variant_label" hint='Axis shown to buyers, e.g. "Ring Size", "Length"'>
+                <Input id="variant_label" value={form.variant_label} onChange={(e) => set("variant_label", e.target.value)} placeholder="Ring Size" />
+              </Field>
+              <Field label="Unit" htmlFor="unit" hint='Optional, e.g. "US", "in", "cm"'>
+                <Input id="unit" value={form.size_unit} onChange={(e) => set("size_unit", e.target.value)} placeholder="US" />
+              </Field>
+            </div>
+
+            {form.variants.length === 0 ? (
+              <p className="rounded-lg border border-dashed border-line-strong p-3 text-sm text-muted">
+                No variations — this is a single-SKU product. Add one to sell it in
+                multiple {axisLabel.toLowerCase()}s, each stocked independently.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                <div className="hidden gap-2 px-1 text-xs font-semibold text-faint sm:grid sm:grid-cols-[90px_1fr_100px_90px_auto_auto]">
+                  <span>{axisLabel}</span><span>SKU</span><span>Price ₹</span><span>Wt (g)</span><span>Active</span><span />
+                </div>
+                {form.variants.map((v, i) => (
+                  <div key={i} className="grid grid-cols-2 gap-2 sm:grid-cols-[90px_1fr_100px_90px_auto_auto] sm:items-center">
+                    <Input value={v.size} onChange={(e) => setVariant(i, "size", e.target.value)} placeholder="6" aria-label={axisLabel} />
+                    <Input value={v.sku} onChange={(e) => setVariant(i, "sku", e.target.value)} placeholder="Auto / SKU" aria-label="Variation SKU" />
+                    <Input inputMode="decimal" value={v.price} onChange={(e) => setVariant(i, "price", e.target.value)} placeholder="Inherit" aria-label="Price" />
+                    <Input inputMode="decimal" value={v.weight} onChange={(e) => setVariant(i, "weight", e.target.value)} placeholder="—" aria-label="Weight (g)" />
+                    <label className="inline-flex items-center gap-1.5 text-sm text-muted">
+                      <input type="checkbox" checked={v.active} onChange={(e) => setVariant(i, "active", e.target.checked)} className="size-4 accent-forest" />
+                      <span className="sm:hidden">Active</span>
+                    </label>
+                    <Button type="button" variant="ghost" size="icon" onClick={() => rmVariant(i)}><Trash2 className="size-4 text-faint" /></Button>
+                  </div>
+                ))}
+                <p className="text-xs text-faint">
+                  Blank price inherits the product price. Stock per variation is
+                  received/adjusted below — it never changes here.
+                </p>
+              </div>
+            )}
+          </CardBody>
+        </Card>
+
+        {isEdit && product!.has_sizes && (
+          <ProductSizeStock product={product!} onChanged={() => onSaved?.()} />
+        )}
 
         <Card>
           <CardHeader>

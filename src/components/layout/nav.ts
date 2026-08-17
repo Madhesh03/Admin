@@ -3,11 +3,8 @@ import {
   Package,
   FolderTree,
   Layers,
-  Star,
   ShoppingBag,
-  Undo2,
   Truck,
-  IndianRupee,
   Users,
   Boxes,
   Factory,
@@ -46,16 +43,19 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: "/products", label: "Products", icon: Package, perm: "catalog.view_product", match: startsWith("/products") },
       { href: "/categories", label: "Categories", icon: FolderTree, perm: "catalog.view_product", match: startsWith("/categories") },
       { href: "/collections", label: "Collections", icon: Layers, perm: "catalog.view_product", match: startsWith("/collections") },
-      { href: "/reviews", label: "Reviews", icon: Star, perm: "catalog.view_product", match: startsWith("/reviews") },
+      // Hidden: Reviews module
+      // { href: "/reviews", label: "Reviews", icon: Star, perm: "catalog.view_product", match: startsWith("/reviews") },
     ],
   },
   {
     label: "Sales",
     items: [
       { href: "/orders", label: "Orders", icon: ShoppingBag, perm: "orders.view_order", match: startsWith("/orders") },
-      { href: "/returns", label: "Returns", icon: Undo2, perm: "orders.view_order", match: startsWith("/returns") },
+      // Hidden: Returns module
+      // { href: "/returns", label: "Returns", icon: Undo2, perm: "orders.view_order", match: startsWith("/returns") },
       { href: "/shipments", label: "Shipments", icon: Truck, perm: "shipping.manage_shipment", match: startsWith("/shipments") },
-      { href: "/refunds", label: "Refunds", icon: IndianRupee, perm: "orders.view_order", match: startsWith("/refunds") },
+      // Hidden: Refunds module
+      // { href: "/refunds", label: "Refunds", icon: IndianRupee, perm: "orders.view_order", match: startsWith("/refunds") },
       { href: "/customers", label: "Customers", icon: Users, perm: "orders.view_order", match: startsWith("/customers") },
     ],
   },

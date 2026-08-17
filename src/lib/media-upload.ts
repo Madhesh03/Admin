@@ -10,7 +10,13 @@
  * so the thumbnail renders inline. Keeping this in one place means the new and
  * edit flows can never drift apart.
  */
-import { confirmMedia, presignMedia, USE_MOCKS } from "./admin-api";
+import {
+  confirmCategoryImage,
+  confirmMedia,
+  presignCategoryImage,
+  presignMedia,
+  USE_MOCKS,
+} from "./admin-api";
 import type { ProductMedia } from "./types";
 import { blobToDataUrl } from "./utils";
 
@@ -73,6 +79,59 @@ export async function uploadProductImage({
     file_size: blob.size,
     is_primary: isPrimary,
   });
+}
+
+/**
+ * Upload a category thumbnail via the S3 direct-upload flow (presign → PUT →
+ * confirm) and return the value to store in `category.image_key`.
+ *
+ *   • real: bytes are PUT to the presigned URL, then the bare `s3_key` is
+ *     confirmed and returned — `mediaUrl` resolves it via NEXT_PUBLIC_MEDIA_BASE_URL.
+ *   • mock: no S3 round-trip — the base64 data-URI is confirmed and returned so
+ *     <Thumb> renders it inline.
+ *
+ * Unlike products, a category has no media table: the returned key lives on the
+ * category record, so persisting it happens when the category is saved.
+ */
+export async function uploadCategoryImage({
+  blob,
+  fileName,
+  mime,
+}: {
+  blob: Blob;
+  fileName: string;
+  mime: string;
+}): Promise<string> {
+  const { presigned_url, s3_key } = await presignCategoryImage({
+    file_name: fileName,
+    mime_type: mime,
+  });
+
+  if (USE_MOCKS) {
+    const dataUrl = await blobToDataUrl(blob);
+    const { image_key } = await confirmCategoryImage({
+      s3_key: dataUrl,
+      file_name: fileName,
+      mime_type: mime,
+    });
+    return image_key;
+  }
+
+  const put = await fetch(presigned_url, {
+    method: "PUT",
+    headers: { "Content-Type": mime, "Cache-Control": IMAGE_CACHE_CONTROL },
+    body: blob,
+  });
+  if (!put.ok) {
+    throw new Error(`Upload to storage failed (${put.status}). Check the bucket's CORS rules.`);
+  }
+  const { image_key } = await confirmCategoryImage({
+    s3_key, // the real key from presign — required by the backend's validation
+    file_name: fileName,
+    mime_type: mime,
+    file_size: blob.size,
+  });
+  return image_key;
 }
 
 /** A pasted image URL, added directly (mock) or fetched then uploaded (real). */

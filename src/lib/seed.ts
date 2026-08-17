@@ -6,7 +6,7 @@
  * the demo renders offline; the backend swaps them for real S3/CDN URLs.
  */
 import { effectivePrice } from "./derive";
-import type { StoredProduct } from "./internal";
+import type { StoredProduct, StoredVariation } from "./internal";
 import type {
   Address,
   Category,
@@ -209,6 +209,7 @@ interface PInput {
   stones?: StoneDetail[];
   purity?: string;
   sizes?: string;
+  variantLabel?: string;
 }
 
 const P: PInput[] = [
@@ -246,14 +247,52 @@ function makeSku(metal: MetalType) {
   return `SOIS-${code}-${String(skuCounter[code]).padStart(4, "0")}`;
 }
 
+/** Parse "6,7,8" into distinct trimmed sizes; "Adjustable"/blank → no sizes. */
+function parseSizes(raw: string): string[] {
+  if (!raw || raw === "Adjustable") return [];
+  const seen: string[] = [];
+  for (const part of raw.split(",")) {
+    const s = part.trim();
+    if (s && !seen.includes(s)) seen.push(s);
+  }
+  return seen;
+}
+
+/**
+ * Split a total qty across sizes as evenly as possible (remainder to the front)
+ * and build a full variation row per size: a derived SKU and a metal weight that
+ * grows slightly with the larger sizes — the WooCommerce-style detail.
+ */
+function distributeSizeStock(
+  raw: string,
+  total: number,
+  sku: string,
+  baseWeight: number,
+): StoredVariation[] {
+  const sizes = parseSizes(raw);
+  if (sizes.length === 0) return [];
+  const base = Math.floor(total / sizes.length);
+  let remainder = total - base * sizes.length;
+  return sizes.map((size, i) => ({
+    size,
+    qty: base + (remainder-- > 0 ? 1 : 0),
+    sku: `${sku}-${size}`,
+    price: null, // inherit the product price
+    net_weight: Math.round(baseWeight * (1 + i * 0.04) * 1000) / 1000,
+    is_active: true,
+  }));
+}
+
 function makeProduct(input: PInput): StoredProduct {
   const metal = input.metal ?? "silver";
   const created = nextCreated();
   const qty = input.qty;
   const status = qty <= 0 ? "out_of_stock" : "active";
+  const sku = makeSku(metal);
+  const netWeight = Math.round((2.5 + Math.random() * 5) * 100) / 100;
   return {
     id: `prod_${slug(input.name)}`,
-    sku: makeSku(metal),
+    sku,
     name: input.name,
     slug: slug(input.name),
     description: `${input.name} — handcrafted in ${metal.replace("_", " ")} with a tarnish-resistant finish. A SOIS everyday essential.`,
@@ -267,13 +306,20 @@ function makeProduct(input: PInput): StoredProduct {
     metal_type: metal,
     purity: input.purity ?? "925 Sterling",
     gross_weight: Math.round((3 + Math.random() * 6) * 100) / 100,
-    net_weight: Math.round((2.5 + Math.random() * 5) * 100) / 100,
+    net_weight: netWeight,
+    length_mm: Math.round((10 + Math.random() * 40) * 10) / 10,
+    width_mm: Math.round((5 + Math.random() * 20) * 10) / 10,
+    height_mm: Math.round((2 + Math.random() * 10) * 10) / 10,
     stone_details: input.stones ?? [],
     certificate_details: input.stones?.length
       ? { BIS: "Hallmarked", Purity: "92.5%", Certification: "SGL" }
       : { BIS: "Hallmarked", Purity: "92.5%" },
     available_sizes: input.sizes ?? "",
     size_unit: input.sizes && input.sizes !== "Adjustable" ? "US" : "",
+    variant_label: input.variantLabel ?? (input.sizes && input.sizes !== "Adjustable" ? "Ring Size" : ""),
+    // Spread the product qty across its discrete sizes so the per-size
+    // breakdown reconciles with the denormalized total, exactly like the backend.
+    size_stocks: distributeSizeStock(input.sizes ?? "", qty, sku, netWeight),
     care_instruction: CARE,
     is_featured: input.featured ?? false,
     tags: input.tags ?? [],
@@ -353,6 +399,7 @@ function poItem(products: StoredProduct[], s: string, ordered: number, received:
     product_id: p.id,
     product_sku: p.sku,
     product_name: p.name,
+    size: "",
     qty_ordered: ordered,
     qty_received: received,
     qty_pending: Math.max(0, ordered - received),
@@ -640,6 +687,7 @@ export function buildSeedLedger(products: StoredProduct[]): StockLedgerEntry[] {
       id: `led_${++i}`,
       product_id: p.id,
       product_sku: p.sku,
+      size: "",
       reason,
       change_qty: change,
       balance_after: balAfter,

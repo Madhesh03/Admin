@@ -56,8 +56,11 @@ import type {
 // contract). These are type-only imports — erased at compile time, so no mock
 // runtime/seed code is pulled into the real bundle.
 import type {
+  BulkUpdateProductsInput,
+  CategoryImagePresignInput,
   CategoryInput,
   CollectionInput,
+  ConfirmCategoryImageInput,
   ConfirmMediaInput,
   ListOrdersParams,
   ListProductsParams,
@@ -109,6 +112,15 @@ export function updateProduct(
   return apiPatch<ProductDetail>(`/catalog/staff/products/${id}/`, patch);
 }
 
+export function bulkUpdateProducts(
+  input: BulkUpdateProductsInput,
+): Promise<{ updated: number }> {
+  return apiPost<{ updated: number }>(
+    "/catalog/staff/products/bulk-update/",
+    input,
+  );
+}
+
 export function archiveProduct(id: string): Promise<void> {
   return apiDelete(`/catalog/staff/products/${id}/`);
 }
@@ -137,6 +149,20 @@ export function deleteMedia(mediaId: string): Promise<void> {
 
 export function listCategories(): Promise<Category[]> {
   return apiGet<Category[]>("/catalog/staff/categories/");
+}
+
+export function presignCategoryImage(input: CategoryImagePresignInput): Promise<{
+  presigned_url: string;
+  s3_key: string;
+  expires_in: number;
+}> {
+  return apiPost("/catalog/staff/categories/media/presign/", input);
+}
+
+export function confirmCategoryImage(
+  input: ConfirmCategoryImageInput,
+): Promise<{ image_key: string }> {
+  return apiPost("/catalog/staff/categories/media/confirm/", input);
 }
 
 export function createCategory(input: CategoryInput): Promise<Category> {
@@ -304,11 +330,14 @@ export function adjustStock(
   productId: string,
   newQty: number,
   note: string,
+  size = "",
 ): Promise<StockLedgerEntry> {
   return apiPost<StockLedgerEntry>("/inventory/stock/adjust/", {
     product_id: productId,
     new_qty: newQty,
     note,
+    // Only send `size` for a per-size adjustment; blank means whole-product.
+    ...(size.trim() ? { size: size.trim() } : {}),
   });
 }
 

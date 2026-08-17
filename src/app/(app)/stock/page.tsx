@@ -310,12 +310,13 @@ function LedgerDialog({ product, onClose }: { product: ProductList | null; onClo
               <EmptyState title="No movements" description="No stock ledger entries for this product yet." />
             ) : (
               <Table>
-                <THead><tr><Th>When</Th><Th>Reason</Th><Th className="text-right">Change</Th><Th className="text-right">Balance</Th><Th>Note</Th></tr></THead>
+                <THead><tr><Th>When</Th><Th>Reason</Th><Th>Size</Th><Th className="text-right">Change</Th><Th className="text-right">Balance</Th><Th>Note</Th></tr></THead>
                 <TBody>
                   {data.map((e) => (
                     <Tr key={e.id}>
                       <Td className="whitespace-nowrap text-xs text-muted">{formatDateTime(e.timestamp)}</Td>
                       <Td>{titleCase(e.reason)}</Td>
+                      <Td className="text-muted">{e.size || "—"}</Td>
                       <Td className={cn("text-right font-semibold", e.change_qty >= 0 ? "text-green-600" : "text-red-600")}>{e.change_qty > 0 ? `+${e.change_qty}` : e.change_qty}</Td>
                       <Td className="text-right">{e.balance_after}</Td>
                       <Td className="text-xs text-muted">{e.note}{e.actor_email ? ` · ${e.actor_email}` : ""}</Td>

@@ -78,7 +78,12 @@ function Detail({ po, onChange }: { po: PurchaseOrder; onChange: (p: PurchaseOrd
               {po.items.map((it) => (
                 <Tr key={it.id}>
                   <Td>
-                    <p className="font-medium text-ink">{it.product_name}</p>
+                    <p className="font-medium text-ink">
+                      {it.product_name}
+                      {it.size && (
+                        <span className="ml-2 rounded bg-surface px-1.5 py-0.5 text-xs font-semibold text-muted">Size {it.size}</span>
+                      )}
+                    </p>
                     <p className="text-xs text-faint">{it.product_sku}</p>
                   </Td>
                   <Td className="text-right">{it.qty_ordered}</Td>
@@ -174,7 +179,10 @@ function ReceiveDialog({ po, onClose, onDone }: { po: PurchaseOrder; onClose: ()
           {pending.map((it) => (
             <div key={it.id} className="flex items-center gap-3">
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-ink">{it.product_name}</p>
+                <p className="truncate text-sm font-medium text-ink">
+                  {it.product_name}
+                  {it.size && <span className="text-muted"> · Size {it.size}</span>}
+                </p>
                 <p className="text-xs text-faint">{it.qty_pending} pending</p>
               </div>
               <Input

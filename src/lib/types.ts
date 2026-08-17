@@ -128,6 +128,8 @@ export interface Category {
   parent: string | null; // parent category id
   description: string;
   image_key: string; // S3 object key
+  /** Presigned GET URL for image_key (real backend); null if S3 unset. */
+  image_url?: string | null;
   is_active: boolean;
   sort_order: number;
 }
@@ -162,6 +164,27 @@ export interface StoneDetail {
   count: number;
 }
 
+/**
+ * One product variation (WooCommerce-style) — a single variant value with its
+ * own SKU, price, weight and stock. `size` holds the variant value (a ring size,
+ * a chain length, a bangle diameter); the axis is named by `variant_label`.
+ */
+export interface ProductSizeStock {
+  size: string;
+  /** Variation SKU; "" when not set. */
+  sku: string;
+  /** Price override for this variation; null ⇒ inherit the product price. */
+  price: number | null;
+  /** This variation's price after discount (override or product price). */
+  effective_price: number;
+  /** Metal weight in grams for this variation; null when not measured. */
+  net_weight: number | null;
+  /** Inactive variations are hidden from the storefront. */
+  is_active: boolean;
+  qty: number;
+  is_in_stock: boolean;
+}
+
 export interface ProductList {
   id: string;
   sku: string;
@@ -177,6 +200,12 @@ export interface ProductList {
   stock_type: StockType;
   qty: number;
   is_in_stock: boolean;
+  /** Comma-separated available sizes (rings/bangles); "" for unsized products. */
+  available_sizes: string;
+  /** Name of the variant axis ("Ring Size", "Length"); "" ⇒ UI shows "Size". */
+  variant_label: string;
+  /** True when the product is offered in discrete sizes. */
+  has_sizes: boolean;
   status: ProductStatus;
   is_featured: boolean;
   thumbnail_key: string;
@@ -205,10 +234,20 @@ export interface ProductDetail {
   purity: string;
   gross_weight: number | null;
   net_weight: number | null;
+  /** Physical dimensions in millimetres; null when not measured. */
+  length_mm: number | null;
+  width_mm: number | null;
+  height_mm: number | null;
   stone_details: StoneDetail[];
   certificate_details: Record<string, string>;
   available_sizes: string;
   size_unit: string;
+  /** Name of the variant axis ("Ring Size", "Length"); "" ⇒ UI shows "Size". */
+  variant_label: string;
+  /** True when the product is offered in discrete sizes (rings, bangles). */
+  has_sizes: boolean;
+  /** Per-variation breakdown (SKU/price/weight/stock); empty for unsized. */
+  size_stock: ProductSizeStock[];
   care_instruction: string;
   is_featured: boolean;
   tags: string[];
@@ -255,6 +294,8 @@ export interface PurchaseOrderItem {
   product_id: string;
   product_sku: string;
   product_name: string;
+  /** Size this line restocks for sized products; "" for unsized products. */
+  size: string;
   qty_ordered: number;
   qty_received: number;
   qty_pending: number;
@@ -286,6 +327,8 @@ export interface StockLedgerEntry {
   id: string;
   product_id: string;
   product_sku: string;
+  /** Size this movement applies to for sized products; "" for whole-product. */
+  size: string;
   reason: StockLedgerReason;
   change_qty: number; // + in / - out
   balance_after: number;

@@ -20,6 +20,14 @@ export const stoneSchema = z.object({
   count: z.coerce.number().int().min(0).default(1),
 });
 
+export const variationSchema = z.object({
+  size: z.string().trim().min(1, "A value is required"),
+  sku: z.string().trim().default(""),
+  price: z.union([z.coerce.number().min(0, "Can't be negative"), z.null()]).optional(),
+  net_weight: z.union([z.coerce.number().min(0, "Can't be negative"), z.null()]).optional(),
+  is_active: z.boolean().default(true),
+});
+
 export const productFormSchema = z.object({
   name: z.string().trim().min(2, "Name is required"),
   price: z.coerce.number({ message: "Price is required" }).min(0, "Price can't be negative"),
@@ -34,10 +42,15 @@ export const productFormSchema = z.object({
   purity: z.string().trim().default("925 Sterling"),
   gross_weight: z.union([z.coerce.number().min(0), z.null()]).optional(),
   net_weight: z.union([z.coerce.number().min(0), z.null()]).optional(),
+  length_mm: z.union([z.coerce.number().min(0), z.null()]).optional(),
+  width_mm: z.union([z.coerce.number().min(0), z.null()]).optional(),
+  height_mm: z.union([z.coerce.number().min(0), z.null()]).optional(),
   stone_details: z.array(stoneSchema).default([]),
   certificate_details: z.record(z.string(), z.string()).default({}),
   available_sizes: z.string().trim().default(""),
   size_unit: z.string().trim().default(""),
+  variant_label: z.string().trim().default(""),
+  variations: z.array(variationSchema).optional(),
   care_instruction: z.string().trim().default(""),
   is_featured: z.boolean().default(false),
   tags: z.array(z.string().trim()).default([]),

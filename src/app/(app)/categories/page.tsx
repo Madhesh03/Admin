@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Plus, Pencil } from "lucide-react";
+import { Plus, Pencil, Upload } from "lucide-react";
 import {
   createCategory,
   listCategories,
@@ -10,6 +10,8 @@ import {
 } from "@/lib/admin-api";
 import { categorySchema } from "@/lib/schemas";
 import type { Category } from "@/lib/types";
+import { uploadCategoryImage } from "@/lib/media-upload";
+import { preferStableSrc } from "@/lib/utils";
 import { useAsync } from "@/lib/use-async";
 import { useAuth } from "@/components/auth-provider";
 import { RequirePermission } from "@/components/permission-gate";
@@ -60,7 +62,7 @@ function CategoriesInner() {
                 <Tr key={c.id}>
                   <Td>
                     <div className="flex items-center gap-3">
-                      <Thumb src={c.image_key} alt={c.name} className="size-10 shrink-0" />
+                      <Thumb src={preferStableSrc(c.image_key, c.image_url)} alt={c.name} className="size-10 shrink-0" />
                       <div>
                         <p className="font-semibold text-ink">{c.name}</p>
                         <p className="truncate text-xs text-faint">{c.description}</p>
@@ -101,6 +103,37 @@ function CategoryDialog({ category, onClose, onSaved }: { category: Category | n
   });
   const [errors, setErrors] = React.useState<Record<string, string>>({});
   const [busy, setBusy] = React.useState(false);
+  // A file chosen but not yet uploaded — held locally with an object-URL preview
+  // and only uploaded when the category is created/saved.
+  const [pendingFile, setPendingFile] = React.useState<File | null>(null);
+  const [preview, setPreview] = React.useState<string | null>(null);
+  const fileRef = React.useRef<HTMLInputElement>(null);
+
+  // Revoke the preview object URL when it's replaced or the dialog unmounts.
+  const previewRef = React.useRef<string | null>(null);
+  previewRef.current = preview;
+  React.useEffect(() => () => { if (previewRef.current) URL.revokeObjectURL(previewRef.current); }, []);
+
+  function clearPending() {
+    if (preview) URL.revokeObjectURL(preview);
+    setPreview(null);
+    setPendingFile(null);
+  }
+
+  function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-picking the same file
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please choose an image file");
+      return;
+    }
+    // Hold the file locally; upload happens on submit.
+    if (preview) URL.revokeObjectURL(preview);
+    setPendingFile(file);
+    setPreview(URL.createObjectURL(file));
+    setForm((f) => ({ ...f, image_key: "" })); // a picked file supersedes any pasted URL
+  }
 
   async function submit() {
     const parsed = categorySchema.safeParse(form);
@@ -110,8 +143,19 @@ function CategoryDialog({ category, onClose, onSaved }: { category: Category | n
     }
     setBusy(true);
     try {
-      if (category) await updateCategory(category.id, parsed.data);
-      else await createCategory(parsed.data);
+      let data = parsed.data;
+      if (pendingFile) {
+        // presign → PUT bytes to S3 → confirm; returns the key to store in image_key.
+        const image_key = await uploadCategoryImage({
+          blob: pendingFile,
+          fileName: pendingFile.name,
+          mime: pendingFile.type,
+        });
+        data = { ...data, image_key };
+      }
+      if (category) await updateCategory(category.id, data);
+      else await createCategory(data);
+      clearPending();
       toast.success(category ? "Category updated" : "Category created");
       onSaved();
     } catch (err) {
@@ -121,13 +165,45 @@ function CategoryDialog({ category, onClose, onSaved }: { category: Category | n
     }
   }
 
+  // Thumbnail source: a pending file's local preview wins; otherwise show the
+  // stored image via its presigned view URL (bare keys don't resolve on a
+  // private bucket), but a freshly pasted URL is shown directly as typed.
+  const previewSrc = preview
+    ? preview
+    : form.image_key && form.image_key === category?.image_key
+      ? preferStableSrc(form.image_key, category?.image_url)
+      : form.image_key;
+
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent title={category ? "Edit category" : "New category"}>
         <div className="space-y-4">
           <Field label="Name" required error={errors.name}><Input value={form.name} invalid={!!errors.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
           <Field label="Description"><Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
-          <Field label="Image URL / key" hint="Paste an image URL for the mock"><Input value={form.image_key} onChange={(e) => setForm({ ...form, image_key: e.target.value })} /></Field>
+          <Field label="Thumbnail" hint="Upload an image or paste an image URL — uploaded on save">
+            <div className="flex items-start gap-3">
+              <Thumb src={previewSrc} alt={form.name || "Category"} className="size-16 shrink-0" />
+              <div className="flex-1 space-y-2">
+                <Input
+                  placeholder="https://…"
+                  // Show only a genuine pasted URL; a picked file or stored key stays
+                  // hidden here but still renders in the thumbnail preview.
+                  value={preview ? "" : (/^https?:\/\//i.test(form.image_key ?? "") ? form.image_key : "")}
+                  onChange={(e) => { clearPending(); setForm({ ...form, image_key: e.target.value }); }}
+                />
+                <div className="flex items-center gap-2">
+                  <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onPickFile} />
+                  <Button type="button" variant="secondary" size="sm" onClick={() => fileRef.current?.click()}>
+                    <Upload className="size-4" />{pendingFile ? "Change image" : "Upload image"}
+                  </Button>
+                  {(pendingFile || form.image_key) && (
+                    <Button type="button" variant="ghost" size="sm" onClick={() => { clearPending(); setForm({ ...form, image_key: "" }); }}>Remove</Button>
+                  )}
+                </div>
+                {pendingFile && <p className="text-xs text-muted">{pendingFile.name} — uploads when you {category ? "save" : "create"}.</p>}
+              </div>
+            </div>
+          </Field>
           <div className="grid grid-cols-2 gap-4">
             <Field label="Sort order"><Input type="number" value={form.sort_order} onChange={(e) => setForm({ ...form, sort_order: Number(e.target.value) })} /></Field>
           </div>

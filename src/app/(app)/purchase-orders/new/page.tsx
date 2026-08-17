@@ -15,7 +15,23 @@ import { Field, Input, NativeSelect, Textarea } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/states";
 import { toast } from "@/components/ui/toast";
 
-interface Line { product_id: string; qty_ordered: string; unit_cost: string }
+interface Line { product_id: string; size: string; qty_ordered: string; unit_cost: string }
+
+/** Parse a product's comma-separated `available_sizes` into distinct sizes. */
+function sizesOf(p?: ProductList): string[] {
+  if (!p?.available_sizes) return [];
+  const seen: string[] = [];
+  for (const part of p.available_sizes.split(",")) {
+    const s = part.trim();
+    if (s && !seen.includes(s)) seen.push(s);
+  }
+  return seen;
+}
+
+/** The product's variant-axis label (e.g. "Ring Size", "Length"); default "Size". */
+function labelOf(p?: ProductList): string {
+  return p?.variant_label?.trim() || "Size";
+}
 
 export default function NewPurchaseOrderPage() {
   return (
@@ -36,23 +52,46 @@ function Inner() {
   const [tax, setTax] = React.useState("0");
   const [shipping, setShipping] = React.useState("0");
   const [notes, setNotes] = React.useState("");
-  const [lines, setLines] = React.useState<Line[]>([{ product_id: "", qty_ordered: "1", unit_cost: "" }]);
+  const [lines, setLines] = React.useState<Line[]>([{ product_id: "", size: "", qty_ordered: "1", unit_cost: "" }]);
   const [busy, setBusy] = React.useState(false);
 
   const productList: ProductList[] = products.data?.items ?? [];
+  const productById = React.useMemo(
+    () => new Map(productList.map((p) => [p.id, p])),
+    [productList],
+  );
 
   const subtotal = lines.reduce((s, l) => s + (Number(l.qty_ordered) || 0) * (Number(l.unit_cost) || 0), 0);
   const total = subtotal + (Number(tax) || 0) + (Number(shipping) || 0);
 
   function setLine(i: number, k: keyof Line, v: string) {
-    setLines((ls) => { const c = ls.slice(); c[i] = { ...c[i], [k]: v }; return c; });
+    setLines((ls) => {
+      const c = ls.slice();
+      c[i] = { ...c[i], [k]: v };
+      // Switching product invalidates any previously chosen size.
+      if (k === "product_id") c[i].size = "";
+      return c;
+    });
   }
 
   async function submit() {
     if (!supplierId) return toast.error("Select a supplier");
+    // A sized product needs a size before it can go on the PO.
+    const missingSize = lines.find(
+      (l) => l.product_id && sizesOf(productById.get(l.product_id)).length > 0 && !l.size,
+    );
+    if (missingSize) {
+      const p = productById.get(missingSize.product_id);
+      return toast.error(`Pick a ${labelOf(p).toLowerCase()} for ${p?.name ?? "the sized line"}`);
+    }
     const items = lines
       .filter((l) => l.product_id && Number(l.qty_ordered) > 0)
-      .map((l) => ({ product_id: l.product_id, qty_ordered: Number(l.qty_ordered), unit_cost: Number(l.unit_cost) || 0 }));
+      .map((l) => ({
+        product_id: l.product_id,
+        qty_ordered: Number(l.qty_ordered),
+        unit_cost: Number(l.unit_cost) || 0,
+        ...(l.size ? { size: l.size } : {}),
+      }));
     if (items.length === 0) return toast.error("Add at least one line item");
     setBusy(true);
     try {
@@ -84,19 +123,32 @@ function Inner() {
         <div className="grid gap-6 lg:grid-cols-3">
           <div className="space-y-6 lg:col-span-2">
             <Card>
-              <CardHeader><CardTitle>Line items</CardTitle><Button variant="secondary" size="sm" onClick={() => setLines([...lines, { product_id: "", qty_ordered: "1", unit_cost: "" }])}><Plus className="size-4" />Add line</Button></CardHeader>
+              <CardHeader><CardTitle>Line items</CardTitle><Button variant="secondary" size="sm" onClick={() => setLines([...lines, { product_id: "", size: "", qty_ordered: "1", unit_cost: "" }])}><Plus className="size-4" />Add line</Button></CardHeader>
               <CardBody className="space-y-3">
-                {lines.map((l, i) => (
-                  <div key={i} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_90px_120px_auto]">
-                    <NativeSelect value={l.product_id} onChange={(e) => setLine(i, "product_id", e.target.value)}>
-                      <option value="">Select product…</option>
-                      {productList.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>)}
-                    </NativeSelect>
-                    <Input inputMode="numeric" placeholder="Qty" value={l.qty_ordered} onChange={(e) => setLine(i, "qty_ordered", e.target.value)} />
-                    <Input inputMode="numeric" placeholder="Unit cost ₹" value={l.unit_cost} onChange={(e) => setLine(i, "unit_cost", e.target.value)} />
-                    <Button variant="ghost" size="icon" onClick={() => setLines(lines.filter((_, x) => x !== i))}><Trash2 className="size-4 text-faint" /></Button>
-                  </div>
-                ))}
+                {lines.map((l, i) => {
+                  const prod = productById.get(l.product_id);
+                  const sizes = sizesOf(prod);
+                  const label = labelOf(prod);
+                  return (
+                    <div key={i} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_90px_90px_120px_auto]">
+                      <NativeSelect value={l.product_id} onChange={(e) => setLine(i, "product_id", e.target.value)}>
+                        <option value="">Select product…</option>
+                        {productList.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>)}
+                      </NativeSelect>
+                      {sizes.length > 0 ? (
+                        <NativeSelect value={l.size} onChange={(e) => setLine(i, "size", e.target.value)} aria-label={label}>
+                          <option value="">{label}…</option>
+                          {sizes.map((s) => <option key={s} value={s}>{s}</option>)}
+                        </NativeSelect>
+                      ) : (
+                        <Input disabled placeholder="—" aria-label={`No ${label.toLowerCase()}`} value="" readOnly />
+                      )}
+                      <Input inputMode="numeric" placeholder="Qty" value={l.qty_ordered} onChange={(e) => setLine(i, "qty_ordered", e.target.value)} />
+                      <Input inputMode="numeric" placeholder="Unit cost ₹" value={l.unit_cost} onChange={(e) => setLine(i, "unit_cost", e.target.value)} />
+                      <Button variant="ghost" size="icon" onClick={() => setLines(lines.filter((_, x) => x !== i))}><Trash2 className="size-4 text-faint" /></Button>
+                    </div>
+                  );
+                })}
               </CardBody>
             </Card>
           </div>

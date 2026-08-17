@@ -28,8 +28,13 @@ export { ApiError, type Page } from "./http";
 export type {
   ListProductsParams,
   ProductWriteInput,
+  BulkPriceOp,
+  BulkProductChanges,
+  BulkUpdateProductsInput,
   PresignInput,
   ConfirmMediaInput,
+  CategoryImagePresignInput,
+  ConfirmCategoryImageInput,
   CategoryInput,
   CollectionInput,
   SupplierInput,
@@ -62,6 +67,7 @@ export const listProducts = USE_MOCKS ? mock.listProducts : real.listProducts;
 export const getProduct = USE_MOCKS ? mock.getProduct : real.getProduct;
 export const createProduct = USE_MOCKS ? mock.createProduct : real.createProduct;
 export const updateProduct = USE_MOCKS ? mock.updateProduct : real.updateProduct;
+export const bulkUpdateProducts = USE_MOCKS ? mock.bulkUpdateProducts : real.bulkUpdateProducts;
 export const archiveProduct = USE_MOCKS ? mock.archiveProduct : real.archiveProduct;
 
 /* Media */
@@ -73,6 +79,8 @@ export const deleteMedia = USE_MOCKS ? mock.deleteMedia : real.deleteMedia;
 export const listCategories = USE_MOCKS ? mock.listCategories : real.listCategories;
 export const createCategory = USE_MOCKS ? mock.createCategory : real.createCategory;
 export const updateCategory = USE_MOCKS ? mock.updateCategory : real.updateCategory;
+export const presignCategoryImage = USE_MOCKS ? mock.presignCategoryImage : real.presignCategoryImage;
+export const confirmCategoryImage = USE_MOCKS ? mock.confirmCategoryImage : real.confirmCategoryImage;
 
 /* Collections */
 export const listCollections = USE_MOCKS ? mock.listCollections : real.listCollections;

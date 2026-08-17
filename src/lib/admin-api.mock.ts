@@ -27,7 +27,7 @@ import {
   slugify,
   stockLevel,
 } from "./derive";
-import type { StoredProduct } from "./internal";
+import type { StoredProduct, StoredVariation } from "./internal";
 import {
   get,
   getStoredSession,
@@ -51,6 +51,7 @@ import type {
   ProductDetail,
   ProductList,
   ProductMedia,
+  ProductSizeStock,
   ProductStatus,
   PurchaseOrder,
   PurchaseOrderItem,
@@ -161,6 +162,76 @@ function colById(id: string | null): Collection | null {
   return get("collections").find((c) => c.id === id) ?? null;
 }
 
+/** Parse "6,7,8" into distinct trimmed sizes; blank/"Adjustable" → []. */
+function parseSizes(raw: string): string[] {
+  if (!raw || raw.trim() === "" || raw === "Adjustable") return [];
+  const seen: string[] = [];
+  for (const part of raw.split(",")) {
+    const s = part.trim();
+    if (s && !seen.includes(s)) seen.push(s);
+  }
+  return seen;
+}
+
+/** One variation's metadata as written under a product's `variations`. */
+interface VariationInput {
+  size: string;
+  sku?: string;
+  price?: number | null;
+  net_weight?: number | null;
+  is_active?: boolean;
+}
+
+/** A blank variation row for a freshly-declared size (stock starts at 0). */
+function blankVariation(size: string): StoredVariation {
+  return { size, qty: 0, sku: "", price: null, net_weight: null, is_active: true };
+}
+
+/**
+ * Reconcile the stored variation rows to a size list, applying per-variation
+ * metadata (sku/price/weight/active) from `variations` when present. Existing
+ * `qty` and untouched metadata are preserved; new sizes default to a blank row;
+ * rows for removed sizes are dropped. Mirrors the backend `_reconcile_variations`.
+ */
+function reconcileSizeStocks(
+  raw: string,
+  existing: StoredVariation[],
+  variations?: VariationInput[],
+): StoredVariation[] {
+  const bySize = new Map(existing.map((r) => [r.size, r]));
+  const meta = new Map((variations ?? []).map((v) => [v.size.trim(), v]));
+  return parseSizes(raw).map((size) => {
+    const row = bySize.get(size) ?? blankVariation(size);
+    const m = meta.get(size);
+    if (!m) return row; // bare size-list edit must not wipe existing metadata
+    return {
+      ...row,
+      sku: (m.sku ?? "").trim(),
+      price: m.price ?? null,
+      net_weight: m.net_weight ?? null,
+      is_active: m.is_active ?? true,
+    };
+  });
+}
+
+/** Build the API `size_stock` view for a stored product (adds effective_price). */
+function toSizeStockView(p: StoredProduct): ProductSizeStock[] {
+  const bySize = new Map(p.size_stocks.map((r) => [r.size, r]));
+  return parseSizes(p.available_sizes).map((size) => {
+    const r = bySize.get(size) ?? blankVariation(size);
+    return {
+      size,
+      sku: r.sku,
+      price: r.price,
+      effective_price: effectivePrice(r.price ?? p.price, p.discount_percent),
+      net_weight: r.net_weight,
+      is_active: r.is_active,
+      qty: r.qty,
+      is_in_stock: r.qty > 0,
+    };
+  });
+}
+
 function toProductList(p: StoredProduct): ProductList {
   const primary = p.media.find((m) => m.is_primary && m.media_type === "image");
   const thumb = primary?.s3_key ?? p.media[0]?.s3_key ?? "";
@@ -179,6 +250,9 @@ function toProductList(p: StoredProduct): ProductList {
     stock_type: p.stock_type,
     qty: p.qty,
     is_in_stock: isInStock(p.qty),
+    available_sizes: p.available_sizes,
+    variant_label: p.variant_label,
+    has_sizes: parseSizes(p.available_sizes).length > 0,
     status: p.status,
     is_featured: p.is_featured,
     thumbnail_key: thumb,
@@ -209,10 +283,18 @@ function toProductDetail(p: StoredProduct): ProductDetail {
     purity: p.purity,
     gross_weight: p.gross_weight,
     net_weight: p.net_weight,
+    length_mm: p.length_mm,
+    width_mm: p.width_mm,
+    height_mm: p.height_mm,
     stone_details: p.stone_details,
     certificate_details: p.certificate_details,
     available_sizes: p.available_sizes,
     size_unit: p.size_unit,
+    variant_label: p.variant_label,
+    has_sizes: parseSizes(p.available_sizes).length > 0,
+    // Ordered by the declared sizes; a size with no stored row reports a blank
+    // variation — the same contract the backend's get_size_stock() returns.
+    size_stock: toSizeStockView(p),
     care_instruction: p.care_instruction,
     is_featured: p.is_featured,
     tags: p.tags,
@@ -326,13 +408,28 @@ export interface ProductWriteInput {
   purity?: string;
   gross_weight?: number | null;
   net_weight?: number | null;
+  length_mm?: number | null;
+  width_mm?: number | null;
+  height_mm?: number | null;
   stone_details?: StoneDetail[];
   certificate_details?: Record<string, string>;
   available_sizes?: string;
   size_unit?: string;
+  variant_label?: string;
+  /**
+   * WooCommerce-style variations. When present, this is the source of truth for
+   * which variant values exist (and derives `available_sizes`); each entry sets
+   * that variation's SKU/price/weight/active. Stock is never set here.
+   */
+  variations?: VariationInput[];
   care_instruction?: string;
   is_featured?: boolean;
   tags?: string[];
+}
+
+/** Ordered, de-duplicated variant values derived from a variations payload. */
+function sizesFromVariations(variations: VariationInput[]): string {
+  return parseSizes(variations.map((v) => v.size).join(",")).join(",");
 }
 
 export async function createProduct(
@@ -349,6 +446,10 @@ export async function createProduct(
   const taken = new Set(products.map((p) => p.slug));
   while (taken.has(slug)) slug = `${baseSlug}-${n++}`;
 
+  // Variations, when supplied, define the ordered size list (mirrors backend).
+  const availableSizes = input.variations
+    ? sizesFromVariations(input.variations)
+    : input.available_sizes ?? "";
   const product: StoredProduct = {
     id: newId(),
     sku: input.sku?.trim() || nextSku(input.metal_type, products.map((p) => p.sku)),
@@ -366,10 +467,17 @@ export async function createProduct(
     purity: input.purity ?? "925 Sterling",
     gross_weight: input.gross_weight ?? null,
     net_weight: input.net_weight ?? null,
+    length_mm: input.length_mm ?? null,
+    width_mm: input.width_mm ?? null,
+    height_mm: input.height_mm ?? null,
     stone_details: input.stone_details ?? [],
     certificate_details: input.certificate_details ?? {},
-    available_sizes: input.available_sizes ?? "",
+    available_sizes: availableSizes,
     size_unit: input.size_unit ?? "",
+    variant_label: input.variant_label ?? "",
+    // New products start at zero stock everywhere; sizes seed variation rows at
+    // qty 0, carrying any SKU/price/weight metadata from the variations payload.
+    size_stocks: reconcileSizeStocks(availableSizes, [], input.variations),
     care_instruction: input.care_instruction ?? "",
     is_featured: input.is_featured ?? false,
     tags: input.tags ?? [],
@@ -402,19 +510,118 @@ export async function updateProduct(
     ...(patch.purity != null ? { purity: patch.purity } : {}),
     ...("gross_weight" in patch ? { gross_weight: patch.gross_weight ?? null } : {}),
     ...("net_weight" in patch ? { net_weight: patch.net_weight ?? null } : {}),
+    ...("length_mm" in patch ? { length_mm: patch.length_mm ?? null } : {}),
+    ...("width_mm" in patch ? { width_mm: patch.width_mm ?? null } : {}),
+    ...("height_mm" in patch ? { height_mm: patch.height_mm ?? null } : {}),
     ...(patch.stone_details != null ? { stone_details: patch.stone_details } : {}),
     ...(patch.certificate_details != null ? { certificate_details: patch.certificate_details } : {}),
     ...(patch.available_sizes != null ? { available_sizes: patch.available_sizes } : {}),
+    ...(patch.variations != null ? { available_sizes: sizesFromVariations(patch.variations) } : {}),
     ...(patch.size_unit != null ? { size_unit: patch.size_unit } : {}),
+    ...(patch.variant_label != null ? { variant_label: patch.variant_label } : {}),
     ...(patch.care_instruction != null ? { care_instruction: patch.care_instruction } : {}),
     ...(patch.is_featured != null ? { is_featured: patch.is_featured } : {}),
     ...(patch.tags != null ? { tags: patch.tags } : {}),
     updated_at: new Date().toISOString(),
   };
+  // Keep variation rows in step when the size list or variation metadata is
+  // edited; a bare size-list change preserves existing SKUs/prices/weights.
+  if (patch.available_sizes != null || patch.variations != null) {
+    next.size_stocks = reconcileSizeStocks(
+      next.available_sizes,
+      existing.size_stocks,
+      patch.variations,
+    );
+  }
   // Keep status honest with stock when not explicitly archived/draft.
   if (next.status === "active" && next.qty <= 0) next.status = "out_of_stock";
   writeProduct(next);
   return clone(toProductDetail(next));
+}
+
+/**
+ * A WooCommerce-style price adjustment applied per product in a bulk edit.
+ *   • set      — replace with an absolute amount (`unit` ignored)
+ *   • increase — add `value` (₹ when unit="amount", % of current when "percent")
+ *   • decrease — subtract `value` (same unit rules), floored at 0
+ */
+export interface BulkPriceOp {
+  mode: "set" | "increase" | "decrease";
+  value: number;
+  unit: "amount" | "percent";
+}
+
+/**
+ * The common fields a bulk edit can change across many products at once. Every
+ * field is optional — an omitted key leaves that attribute untouched on each
+ * product. `category_id`/`collection_id` accept `null` to clear the link.
+ */
+export interface BulkProductChanges {
+  price?: BulkPriceOp;
+  discount_percent?: number; // set to (0–100)
+  status?: ProductStatus;
+  category_id?: string | null;
+  collection_id?: string | null;
+  metal_type?: MetalType;
+  is_featured?: boolean;
+}
+
+export interface BulkUpdateProductsInput {
+  ids: string[];
+  changes: BulkProductChanges;
+}
+
+/** Resolve one product's new price from its current price and a bulk op. */
+function applyPriceOp(current: number, op: BulkPriceOp): number {
+  let next = current;
+  if (op.mode === "set") {
+    next = op.value;
+  } else {
+    const delta = op.unit === "percent" ? (current * op.value) / 100 : op.value;
+    next = op.mode === "increase" ? current + delta : current - delta;
+  }
+  return Math.max(0, Math.round(next * 100) / 100);
+}
+
+/**
+ * Apply the same `changes` to every product in `ids` in one shot. Mirrors the
+ * per-product `updateProduct` write (including the active/out-of-stock status
+ * reconciliation), so a bulk edit and N single edits land the same data.
+ */
+export async function bulkUpdateProducts(
+  input: BulkUpdateProductsInput,
+): Promise<{ updated: number }> {
+  await tick(true);
+  requirePermission("catalog.edit_product");
+  // TODO(backend): fetch("/catalog/staff/products/bulk-update/", { method:"POST", ... })
+  const { ids, changes } = input;
+  if (!ids.length) throw new ApiError("Select at least one product");
+  const idSet = new Set(ids);
+  const now = new Date().toISOString();
+  let updated = 0;
+  const next = get("products").map((p) => {
+    if (!idSet.has(p.id)) return p;
+    updated++;
+    let status = changes.status ?? p.status;
+    // Keep status honest with stock, exactly like updateProduct.
+    if (status === "active" && p.qty <= 0) status = "out_of_stock";
+    return {
+      ...p,
+      ...(changes.price ? { price: applyPriceOp(p.price, changes.price) } : {}),
+      ...(changes.discount_percent != null
+        ? { discount_percent: Math.min(100, Math.max(0, changes.discount_percent)) }
+        : {}),
+      status,
+      ...("category_id" in changes ? { category_id: changes.category_id ?? null } : {}),
+      ...("collection_id" in changes ? { collection_id: changes.collection_id ?? null } : {}),
+      ...(changes.metal_type != null ? { metal_type: changes.metal_type } : {}),
+      ...(changes.is_featured != null ? { is_featured: changes.is_featured } : {}),
+      updated_at: now,
+    };
+  });
+  if (!updated) throw new ApiError("No matching products found", 404);
+  set("products", next);
+  return { updated };
 }
 
 export async function archiveProduct(id: string): Promise<void> {
@@ -518,6 +725,41 @@ export async function listCategories(): Promise<Category[]> {
   requirePermission("catalog.view_product");
   // TODO(backend): fetch("/catalog/staff/categories/")
   return clone(get("categories").slice().sort((a, b) => a.sort_order - b.sort_order));
+}
+
+/* -------- Category image: presign → confirm (S3 direct upload) ----------- */
+
+export interface CategoryImagePresignInput {
+  file_name: string;
+  mime_type: string;
+}
+
+export async function presignCategoryImage(
+  input: CategoryImagePresignInput,
+): Promise<{ presigned_url: string; s3_key: string; expires_in: number }> {
+  await tick();
+  requirePermission("catalog.add_product");
+  // TODO(backend): fetch("/catalog/staff/categories/media/presign/", ...) then PUT bytes to presigned_url.
+  // Mock: nothing is uploaded to S3; the caller passes the base64 data-URI as s3_key to confirm.
+  const s3_key = `mock-s3/categories/${newId()}-${input.file_name}`;
+  return { presigned_url: `mock://upload/${s3_key}`, s3_key, expires_in: 900 };
+}
+
+export interface ConfirmCategoryImageInput {
+  s3_key: string; // in the mock this holds the base64 data-URI
+  file_name?: string;
+  mime_type?: string;
+  file_size?: number | null;
+}
+
+export async function confirmCategoryImage(
+  input: ConfirmCategoryImageInput,
+): Promise<{ image_key: string }> {
+  await tick(true);
+  requirePermission("catalog.add_product");
+  // TODO(backend): fetch("/catalog/staff/categories/media/confirm/", ...) — server head_object verifies S3.
+  // Mock echoes the key back (a data-URI) so <Thumb> renders it inline.
+  return { image_key: input.s3_key };
 }
 
 export async function createCategory(input: CategoryInput): Promise<Category> {
@@ -759,7 +1001,7 @@ export async function getPurchaseOrder(id: string): Promise<PurchaseOrder | null
 
 export interface PurchaseOrderCreateInput {
   supplier_id: string;
-  items: { product_id: string; qty_ordered: number; unit_cost: number }[];
+  items: { product_id: string; qty_ordered: number; unit_cost: number; size?: string }[];
   order_date?: string | null;
   expected_delivery_date?: string | null;
   tax_amount?: number;
@@ -778,11 +1020,22 @@ export async function createPurchaseOrder(
   const now = new Date().toISOString();
   const items: PurchaseOrderItem[] = input.items.map((it) => {
     const p = storedById(it.product_id);
+    const size = (it.size ?? "").trim();
+    // Sized products must restock a specific, valid size; unsized must not carry
+    // one — same guard the backend enforces so a receipt can't desync per-size.
+    const sizes = parseSizes(p.available_sizes);
+    if (sizes.length > 0) {
+      if (!size) throw new ApiError(`'${p.sku}' is sold in sizes — specify a size for its line.`);
+      if (!sizes.includes(size)) throw new ApiError(`Size '${size}' is not available for '${p.sku}'.`);
+    } else if (size) {
+      throw new ApiError(`'${p.sku}' is not a sized product — remove the size.`);
+    }
     return {
       id: newId(),
       product_id: p.id,
       product_sku: p.sku,
       product_name: p.name,
+      size,
       qty_ordered: it.qty_ordered,
       qty_received: 0,
       qty_pending: it.qty_ordered,
@@ -887,21 +1140,39 @@ export async function receivePurchaseOrder(
         `Receiving ${r.qty_received} exceeds ${it.qty_pending} pending for ${it.product_sku}`,
       );
     it.qty_received += r.qty_received;
-    // Increment product stock + write a ledger entry (reason=purchase).
+    // Increment product stock + write a ledger entry (reason=purchase). For a
+    // sized line, credit that size's row and re-derive the aggregate as the sum
+    // across sizes; balance_after is that size's running balance.
     const product = storedById(it.product_id);
-    const newQty = product.qty + r.qty_received;
+    let nextSizeStocks = product.size_stocks;
+    let newTotal: number;
+    let balanceAfter: number;
+    if (it.size) {
+      const current = product.size_stocks.find((s) => s.size === it.size)?.qty ?? 0;
+      balanceAfter = current + r.qty_received;
+      const exists = product.size_stocks.some((s) => s.size === it.size);
+      nextSizeStocks = exists
+        ? product.size_stocks.map((s) => (s.size === it.size ? { ...s, qty: balanceAfter } : s))
+        : [...product.size_stocks, { ...blankVariation(it.size), qty: balanceAfter }];
+      newTotal = nextSizeStocks.reduce((sum, s) => sum + s.qty, 0);
+    } else {
+      newTotal = product.qty + r.qty_received;
+      balanceAfter = newTotal;
+    }
     writeProduct({
       ...product,
-      qty: newQty,
+      qty: newTotal,
+      size_stocks: nextSizeStocks,
       status: product.status === "out_of_stock" ? "active" : product.status,
       updated_at: ts,
     });
     appendLedger({
       product_id: product.id,
       product_sku: product.sku,
+      size: it.size,
       reason: "purchase",
       change_qty: r.qty_received,
-      balance_after: newQty,
+      balance_after: balanceAfter,
       reference_type: "purchase_order",
       reference_id: po.id,
       note: `${po.po_number} receipt`,
@@ -992,6 +1263,7 @@ export async function adjustStock(
   productId: string,
   newQty: number,
   note: string,
+  size = "",
 ): Promise<StockLedgerEntry> {
   await tick(true);
   requirePermission("inventory.adjust_stock");
@@ -999,15 +1271,39 @@ export async function adjustStock(
   if (!note?.trim()) throw new ApiError("A note is required for a manual adjustment");
   const product = storedById(productId);
   const clamped = Math.max(0, Math.round(newQty));
-  const delta = clamped - product.qty;
   const ts = new Date().toISOString();
+  const trimmedSize = size.trim();
+
+  let delta: number;
+  let balanceAfter: number;
+  let nextSizeStocks = product.size_stocks;
+  let nextTotal: number;
+
+  if (trimmedSize) {
+    // Per-size adjustment: set this size's row, then re-derive the product
+    // total as the sum across sizes — mirrors the backend's aggregate cache.
+    const current = product.size_stocks.find((r) => r.size === trimmedSize)?.qty ?? 0;
+    delta = clamped - current;
+    balanceAfter = clamped;
+    const exists = product.size_stocks.some((r) => r.size === trimmedSize);
+    nextSizeStocks = exists
+      ? product.size_stocks.map((r) => (r.size === trimmedSize ? { ...r, qty: clamped } : r))
+      : [...product.size_stocks, { ...blankVariation(trimmedSize), qty: clamped }];
+    nextTotal = nextSizeStocks.reduce((sum, r) => sum + r.qty, 0);
+  } else {
+    delta = clamped - product.qty;
+    balanceAfter = clamped;
+    nextTotal = clamped;
+  }
+
   writeProduct({
     ...product,
-    qty: clamped,
+    qty: nextTotal,
+    size_stocks: nextSizeStocks,
     status:
       product.status === "archived"
         ? "archived"
-        : clamped > 0
+        : nextTotal > 0
           ? "active"
           : "out_of_stock",
     updated_at: ts,
@@ -1015,9 +1311,10 @@ export async function adjustStock(
   const entry: Omit<StockLedgerEntry, "id"> = {
     product_id: product.id,
     product_sku: product.sku,
+    size: trimmedSize,
     reason: "adjustment",
     change_qty: delta,
-    balance_after: clamped,
+    balance_after: balanceAfter,
     reference_type: "adjustment",
     reference_id: null,
     note,
@@ -1113,6 +1410,7 @@ export async function updateOrderStatus(
         appendLedger({
           product_id: product.id,
           product_sku: product.sku,
+          size: "",
           reason: "return",
           change_qty: it.quantity,
           balance_after: newQty,

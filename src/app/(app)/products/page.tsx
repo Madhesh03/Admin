@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Plus, Search, MoreHorizontal, Pencil, Archive, Star } from "lucide-react";
+import { Plus, Search, MoreHorizontal, Pencil, Archive, Star, X, SlidersHorizontal } from "lucide-react";
 import {
   archiveProduct,
   listProducts,
@@ -16,9 +16,10 @@ import {
   PRODUCT_STATUSES,
   titleCase,
   type Category,
+  type Collection,
   type ProductList,
 } from "@/lib/types";
-import { listCategories } from "@/lib/admin-api";
+import { listCategories, listCollections } from "@/lib/admin-api";
 import { useAsync, useDebouncedValue } from "@/lib/use-async";
 import { cn, formatPrice, preferStableSrc } from "@/lib/utils";
 import { useAuth } from "@/components/auth-provider";
@@ -40,6 +41,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogClose, DialogContent } from "@/components/ui/dialog";
 import { toast } from "@/components/ui/toast";
+import { BulkEditProductsDialog } from "@/components/products/bulk-edit-products";
 
 const STOCK_TEXT = { out: "text-red-600", low: "text-amber-600", healthy: "text-ink" } as const;
 
@@ -62,6 +64,7 @@ function ProductsInner() {
   const debounced = useDebouncedValue(q);
 
   const cats = useAsync<Category[]>(() => listCategories(), []);
+  const cols = useAsync<Collection[]>(() => listCollections(), []);
   const { data, loading, error, reload } = useAsync(
     () => listProducts({ q: debounced, category, metal_type: metal, status, ordering }),
     [debounced, category, metal, status, ordering],
@@ -69,6 +72,24 @@ function ProductsInner() {
 
   const [toArchive, setToArchive] = React.useState<ProductList | null>(null);
   const [archiving, setArchiving] = React.useState(false);
+
+  // Bulk selection (by product id). Only IDs still present in the current view
+  // can be acted on; `selectedIds` computes the effective set at use sites.
+  const canBulkEdit = can("catalog.edit_product");
+  const [selected, setSelected] = React.useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = React.useState(false);
+
+  function toggleOne(id: string, on: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+  function clearSelection() {
+    setSelected(new Set());
+  }
 
   async function confirmArchive() {
     if (!toArchive) return;
@@ -86,6 +107,22 @@ function ProductsInner() {
   }
 
   const rows = data?.items ?? [];
+
+  // Selection scoped to what's currently visible.
+  const selectedIds = rows.filter((p) => selected.has(p.id)).map((p) => p.id);
+  const allSelected = rows.length > 0 && selectedIds.length === rows.length;
+  const someSelected = selectedIds.length > 0 && !allSelected;
+
+  function toggleAll(on: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const p of rows) {
+        if (on) next.add(p.id);
+        else next.delete(p.id);
+      }
+      return next;
+    });
+  }
 
   return (
     <div>
@@ -132,9 +169,27 @@ function ProductsInner() {
         </NativeSelect>
       </div>
 
+      {canBulkEdit && selectedIds.length > 0 && (
+        <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-forest/30 bg-forest/5 px-4 py-2.5">
+          <span className="text-sm font-semibold text-ink">
+            {selectedIds.length} selected
+          </span>
+          <div className="flex items-center gap-2">
+            <Button size="sm" onClick={() => setBulkOpen(true)}>
+              <SlidersHorizontal className="size-4" />
+              Bulk edit
+            </Button>
+            <Button variant="ghost" size="sm" onClick={clearSelection}>
+              <X className="size-4" />
+              Clear
+            </Button>
+          </div>
+        </div>
+      )}
+
       <Card>
         {loading ? (
-          <TableSkeleton rows={7} cols={6} />
+          <TableSkeleton rows={7} cols={canBulkEdit ? 7 : 6} />
         ) : error ? (
           <ErrorState message={error} onRetry={reload} />
         ) : rows.length === 0 ? (
@@ -143,6 +198,20 @@ function ProductsInner() {
           <Table>
             <THead>
               <tr>
+                {canBulkEdit && (
+                  <Th className="w-10">
+                    <input
+                      type="checkbox"
+                      aria-label="Select all"
+                      className="size-4 cursor-pointer accent-forest align-middle"
+                      checked={allSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = someSelected;
+                      }}
+                      onChange={(e) => toggleAll(e.target.checked)}
+                    />
+                  </Th>
+                )}
                 <Th className="w-[42%]">Product</Th>
                 <Th>Category</Th>
                 <Th>Metal</Th>
@@ -157,9 +226,32 @@ function ProductsInner() {
                 const level = stockLevel(p.qty);
                 return (
                   <Tr key={p.id} clickable onClick={() => router.push(`/products/${p.id}`)}>
+                    {canBulkEdit && (
+                      <Td onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${p.name}`}
+                          className="size-4 cursor-pointer accent-forest align-middle"
+                          checked={selected.has(p.id)}
+                          onChange={(e) => toggleOne(p.id, e.target.checked)}
+                        />
+                      </Td>
+                    )}
                     <Td>
                       <div className="flex items-center gap-3">
-                        <Thumb src={preferStableSrc(p.thumbnail_key, p.thumbnail_url)} alt={p.name} className="size-11 shrink-0" />
+                        <Thumb
+                          // Trust the live `primary_image` (derived from the current
+                          // media set), not the denormalized `thumbnail_key` — the
+                          // backend leaves that stale after the primary image is
+                          // deleted, so it would render a ghost of a removed image.
+                          src={
+                            p.primary_image
+                              ? preferStableSrc(p.primary_image.s3_key, p.primary_image.view_url)
+                              : undefined
+                          }
+                          alt={p.name}
+                          className="size-11 shrink-0"
+                        />
                         <div className="min-w-0">
                           <p className="flex items-center gap-1.5 truncate font-semibold text-ink">
                             {p.name}
@@ -222,6 +314,18 @@ function ProductsInner() {
           </DialogContent>
         )}
       </Dialog>
+
+      <BulkEditProductsDialog
+        open={bulkOpen}
+        onOpenChange={setBulkOpen}
+        productIds={selectedIds}
+        categories={cats.data ?? []}
+        collections={cols.data ?? []}
+        onDone={() => {
+          clearSelection();
+          reload();
+        }}
+      />
     </div>
   );
 }

@@ -27,6 +27,7 @@ export { USE_MOCKS };
 export { ApiError, type Page } from "./http";
 export type {
   ListProductsParams,
+  NameCheckResult,
   ProductWriteInput,
   BulkPriceOp,
   BulkProductChanges,
@@ -67,6 +68,7 @@ export const listProducts = USE_MOCKS ? mock.listProducts : real.listProducts;
 export const getProduct = USE_MOCKS ? mock.getProduct : real.getProduct;
 export const createProduct = USE_MOCKS ? mock.createProduct : real.createProduct;
 export const updateProduct = USE_MOCKS ? mock.updateProduct : real.updateProduct;
+export const checkProductName = USE_MOCKS ? mock.checkProductName : real.checkProductName;
 export const bulkUpdateProducts = USE_MOCKS ? mock.bulkUpdateProducts : real.bulkUpdateProducts;
 export const archiveProduct = USE_MOCKS ? mock.archiveProduct : real.archiveProduct;
 

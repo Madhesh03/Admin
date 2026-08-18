@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Upload, Link2, Trash2, Star, ImagePlus, ZoomIn } from "lucide-react";
+import { Upload, Link2, Trash2, Star, ImagePlus, ZoomIn, RotateCcw } from "lucide-react";
 import { deleteMedia } from "@/lib/admin-api";
 import { uploadProductImage, uploadProductImageFromUrl } from "@/lib/media-upload";
 import type { ProductMedia } from "@/lib/types";
@@ -23,10 +23,22 @@ export function ProductMediaManager({
   productId,
   media,
   onChanged,
+  hideAdd = false,
+  onToggleRemove,
+  removedIds,
 }: {
   productId: string;
   media: ProductMedia[];
   onChanged: () => void;
+  /** Hide the upload/URL controls — show existing media (with delete) only. */
+  hideAdd?: boolean;
+  /**
+   * When provided, the trash button marks/unmarks an image for deletion instead
+   * of deleting it live — the parent performs the delete on save. Pair with
+   * `removedIds` to render the marked (pending-removal) state.
+   */
+  onToggleRemove?: (id: string) => void;
+  removedIds?: ReadonlySet<string>;
 }) {
   const [url, setUrl] = React.useState("");
   const [busy, setBusy] = React.useState(false);
@@ -96,16 +108,23 @@ export function ProductMediaManager({
     <div className="space-y-3">
       {media.length > 0 && (
         <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
-          {media.map((m, i) => (
+          {media.map((m, i) => {
+            const marked = removedIds?.has(m.id) ?? false;
+            return (
             <div
               key={m.id}
               className={cn(
                 "group relative aspect-square overflow-hidden rounded-lg border",
                 m.is_primary ? "border-forest ring-1 ring-forest/30" : "border-line",
+                marked && "opacity-40 ring-1 ring-red-500",
               )}
             >
               <Thumb src={preferStableSrc(m.s3_key, m.view_url)} version={m.id} alt={m.alt_text} className="size-full rounded-none" />
-              {m.is_primary && (
+              {marked ? (
+                <span className="absolute left-1.5 top-1.5 inline-flex items-center gap-0.5 rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                  Will be removed
+                </span>
+              ) : m.is_primary && (
                 <span className="absolute left-1.5 top-1.5 inline-flex items-center gap-0.5 rounded bg-forest px-1.5 py-0.5 text-[10px] font-bold text-white">
                   <Star className="size-2.5" />Primary
                 </span>
@@ -124,20 +143,26 @@ export function ProductMediaManager({
                 <div className="flex justify-end">
                   <button
                     type="button"
-                    title="Remove"
+                    title={onToggleRemove ? (marked ? "Restore" : "Remove") : "Remove"}
                     disabled={busy}
-                    onClick={() => remove(m)}
-                    className="rounded bg-white/90 p-1 text-red-600 hover:bg-white"
+                    onClick={() => (onToggleRemove ? onToggleRemove(m.id) : remove(m))}
+                    className={cn(
+                      "rounded bg-white/90 p-1 hover:bg-white",
+                      marked ? "text-forest" : "text-red-600",
+                    )}
                   >
-                    <Trash2 className="size-3.5" />
+                    {marked ? <RotateCcw className="size-3.5" /> : <Trash2 className="size-3.5" />}
                   </button>
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
+      {!hideAdd && (
+      <>
       {/* Drop zone */}
       <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => handleFiles(e.target.files)} />
       <button
@@ -188,6 +213,8 @@ export function ProductMediaManager({
           <Upload className="size-4" />Add
         </Button>
       </div>
+      </>
+      )}
 
       <ImageZoomModal
         images={media.map((m) => ({

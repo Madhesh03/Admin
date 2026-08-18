@@ -5,14 +5,17 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Plus, Trash2, Save, Boxes } from "lucide-react";
 import {
+  checkProductName,
   createProduct,
+  deleteMedia,
   listCategories,
   listCollections,
   updateProduct,
   type ProductWriteInput,
 } from "@/lib/admin-api";
+import { ApiError } from "@/lib/http";
 import { uploadProductImage } from "@/lib/media-upload";
-import { effectivePrice } from "@/lib/derive";
+import { effectivePrice, nameCode, skuStem, variationSku } from "@/lib/derive";
 import { productFormSchema } from "@/lib/schemas";
 import {
   METAL_LABEL,
@@ -128,11 +131,50 @@ export function ProductForm({
   const [form, setForm] = React.useState<FormState>(() => toState(product));
   const [errors, setErrors] = React.useState<Errors>({});
   const [saving, setSaving] = React.useState(false);
-  // Images chosen on the *new* page — held locally, uploaded after create.
+  // Images chosen locally — held and uploaded on save (create or update).
   const [pending, setPending] = React.useState<PendingImage[]>([]);
+  // Existing media (edit mode) marked for deletion — removed on save.
+  const [removedMedia, setRemovedMedia] = React.useState<Set<string>>(new Set());
 
   const cats = useAsync<Category[]>(() => listCategories(), []);
   const cols = useAsync<Collection[]>(() => listCollections(), []);
+  // Live name-uniqueness: checked against the server as the user types (debounced)
+  // so duplicates surface immediately — before filling the form or uploading images.
+  const [checkingName, setCheckingName] = React.useState(false);
+  // Monotonic id so a slow in-flight check can't overwrite a newer one (and so a
+  // re-render can't leave `checkingName` stuck true, which would hide the error).
+  const nameCheckSeq = React.useRef(0);
+  const productId = product?.id;
+  const originalName = (product?.name ?? "").trim().toLowerCase();
+
+  React.useEffect(() => {
+    const name = form.name.trim();
+    // Empty, or the product's own unchanged name on edit → always fine.
+    if (!name || name.toLowerCase() === originalName) {
+      nameCheckSeq.current++; // invalidate any in-flight check
+      setCheckingName(false);
+      setErrors((prev) => (prev.name ? { ...prev, name: undefined } : prev));
+      return;
+    }
+    const seq = ++nameCheckSeq.current;
+    setCheckingName(true);
+    setErrors((prev) => (prev.name ? { ...prev, name: undefined } : prev));
+    const handle = setTimeout(async () => {
+      try {
+        const res = await checkProductName(name, productId);
+        if (seq !== nameCheckSeq.current) return; // a newer check superseded this
+        setErrors((prev) => ({
+          ...prev,
+          name: res.available ? undefined : "A product with this name already exists",
+        }));
+      } catch {
+        // Network/permission hiccup — don't block typing; save still validates.
+      } finally {
+        if (seq === nameCheckSeq.current) setCheckingName(false);
+      }
+    }, 400);
+    return () => clearTimeout(handle);
+  }, [form.name, originalName, productId]);
 
   function set<K extends keyof FormState>(k: K, v: FormState[K]) {
     setForm((f) => ({ ...f, [k]: v }));
@@ -150,7 +192,7 @@ export function ProductForm({
       ? {
           variations: variants.map((v) => ({
             size: v.size.trim(),
-            sku: v.sku.trim(),
+            // SKU is always system-derived from the product SKU + size.
             price: v.price.trim() ? Number(v.price) : null,
             net_weight: v.weight.trim() ? Number(v.weight) : null,
             is_active: v.active,
@@ -161,7 +203,7 @@ export function ProductForm({
       name: form.name,
       price: Number(form.price),
       metal_type: form.metal_type,
-      sku: form.sku.trim() || undefined,
+      // SKU is always system-generated; never sent from the form.
       description: form.description,
       category_id: form.category_id || null,
       collection_id: form.collection_id || null,
@@ -189,6 +231,27 @@ export function ProductForm({
     };
   }
 
+  // Upload the locally-held images against a product id. Primary first so it
+  // wins the `is_primary` slot on the backend. Returns how many failed.
+  async function uploadPending(productId: string): Promise<number> {
+    const ordered = [...pending].sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary));
+    let failed = 0;
+    for (const p of ordered) {
+      try {
+        await uploadProductImage({
+          productId,
+          blob: p.file,
+          fileName: p.file.name,
+          mime: p.file.type || "application/octet-stream",
+          isPrimary: p.isPrimary,
+        });
+      } catch {
+        failed++;
+      }
+    }
+    return failed;
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const parsed = productFormSchema.safeParse(buildPayload());
@@ -200,33 +263,46 @@ export function ProductForm({
       toast.error("Please fix the highlighted fields");
       return;
     }
+    // Product names must be unique across the store. The live check runs as the
+    // user types; block save while it's pending or if it already flagged a clash
+    // (the API enforces it too, as a backstop).
+    if (checkingName) {
+      toast.error("Still checking the product name — try again in a moment");
+      return;
+    }
+    if (errors.name) {
+      toast.error("Please fix the highlighted fields");
+      return;
+    }
     setErrors({});
     setSaving(true);
     try {
       if (isEdit) {
         await updateProduct(product!.id, buildPayload());
-        toast.success("Product updated");
+        // Image changes are held locally and applied now, on save: delete the
+        // images marked for removal, then upload the newly-picked ones.
+        let failed = 0;
+        for (const id of removedMedia) {
+          try {
+            await deleteMedia(id);
+          } catch {
+            failed++;
+          }
+        }
+        failed += pending.length ? await uploadPending(product!.id) : 0;
+        setRemovedMedia(new Set());
+        setPending([]);
+        if (failed) {
+          toast.error(`Product updated, but ${failed} image change${failed > 1 ? "s" : ""} failed`);
+        } else {
+          toast.success("Product updated");
+        }
         onSaved?.();
         router.push("/products");
       } else {
         const created = await createProduct(buildPayload());
         if (pending.length) {
-          // Primary first so it wins the `is_primary` slot on the backend.
-          const ordered = [...pending].sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary));
-          let failed = 0;
-          for (const p of ordered) {
-            try {
-              await uploadProductImage({
-                productId: created.id,
-                blob: p.file,
-                fileName: p.file.name,
-                mime: p.file.type || "application/octet-stream",
-                isPrimary: p.isPrimary,
-              });
-            } catch {
-              failed++;
-            }
-          }
+          const failed = await uploadPending(created.id);
           if (failed) {
             toast.error(`Product created, but ${failed} image${failed > 1 ? "s" : ""} failed to upload — retry below`);
           } else {
@@ -238,6 +314,13 @@ export function ProductForm({
         router.push("/products");
       }
     } catch (err) {
+      // Surface a server-side duplicate-name error inline on the field.
+      const fieldErrors = (err instanceof ApiError ? err.details : undefined) as
+        | Record<string, string[]>
+        | undefined;
+      if (fieldErrors?.name?.[0]) {
+        setErrors({ name: fieldErrors.name[0] });
+      }
       toast.error(err instanceof Error ? err.message : "Could not save product");
     } finally {
       setSaving(false);
@@ -245,21 +328,21 @@ export function ProductForm({
   }
 
   // repeatable helpers
-  const addStone = () => set("stones", [...form.stones, { type: "", weight: "", quality: "", count: "1" }]);
-  const setStone = (i: number, k: keyof Stone, v: string) =>
-    setForm((f) => { const s = f.stones.slice(); s[i] = { ...s[i], [k]: v }; return { ...f, stones: s }; });
-  const rmStone = (i: number) => set("stones", form.stones.filter((_, x) => x !== i));
-
-  const addCert = () => set("certs", [...form.certs, { key: "", value: "" }]);
-  const setCert = (i: number, k: keyof Cert, v: string) =>
-    setForm((f) => { const c = f.certs.slice(); c[i] = { ...c[i], [k]: v }; return { ...f, certs: c }; });
-  const rmCert = (i: number) => set("certs", form.certs.filter((_, x) => x !== i));
-
   const addVariant = () => set("variants", [...form.variants, { size: "", sku: "", price: "", weight: "", active: true }]);
   const setVariant = (i: number, k: keyof Variant, v: string | boolean) =>
     setForm((f) => { const rows = f.variants.slice(); rows[i] = { ...rows[i], [k]: v }; return { ...f, variants: rows }; });
   const rmVariant = (i: number) => set("variants", form.variants.filter((_, x) => x !== i));
   const axisLabel = form.variant_label.trim() || "Size";
+
+  // Live SKU previews (read-only). The self-describing product SKU is generated
+  // on save: SOIS-<category>-<metal><purity>-<name>. Each variation's SKU is
+  // that code + size. Shown so staff see exactly what will be stored.
+  const catName = (cats.data ?? []).find((c) => c.id === form.category_id)?.name;
+  const productSkuPreview = isEdit
+    ? form.sku
+    : `${skuStem(form.metal_type, catName, form.purity)}-${nameCode(form.name)}`;
+  const variationSkuPreview = (size: string) =>
+    size.trim() ? variationSku(productSkuPreview, size) : "Auto";
 
   return (
     <form
@@ -277,8 +360,20 @@ export function ProductForm({
         <Card>
           <CardHeader><CardTitle>Details</CardTitle></CardHeader>
           <CardBody className="space-y-4">
-            <Field label="Name" htmlFor="name" required error={errors.name}>
-              <Input id="name" value={form.name} invalid={!!errors.name} onChange={(e) => set("name", e.target.value)} placeholder="Celestial Stack Ring" />
+            <Field
+              label="Name"
+              htmlFor="name"
+              required
+              error={errors.name}
+              hint={checkingName ? "Checking availability…" : undefined}
+            >
+              <Input
+                id="name"
+                value={form.name}
+                invalid={!!errors.name}
+                onChange={(e) => set("name", e.target.value)}
+                placeholder="Celestial Stack Ring"
+              />
             </Field>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Metal type" htmlFor="metal" required>
@@ -305,8 +400,8 @@ export function ProductForm({
             <Field label="Description" htmlFor="description">
               <Textarea id="description" value={form.description} onChange={(e) => set("description", e.target.value)} placeholder="A short, evocative description…" />
             </Field>
-            <Field label="SKU" htmlFor="sku" hint={isEdit ? undefined : "Auto-generated if left blank"}>
-              <Input id="sku" value={form.sku} onChange={(e) => set("sku", e.target.value)} disabled={isEdit} placeholder="SOIS-SLV-0001" />
+            <Field label="SKU" htmlFor="sku" hint={isEdit ? "System-generated — not editable" : "Generated automatically on save — not editable"}>
+              <Input id="sku" value={isEdit ? form.sku : ""} readOnly disabled placeholder={productSkuPreview} />
             </Field>
           </CardBody>
         </Card>
@@ -372,7 +467,7 @@ export function ProductForm({
                 {form.variants.map((v, i) => (
                   <div key={i} className="grid grid-cols-2 gap-2 sm:grid-cols-[90px_1fr_100px_90px_auto_auto] sm:items-center">
                     <Input value={v.size} onChange={(e) => setVariant(i, "size", e.target.value)} placeholder="6" aria-label={axisLabel} />
-                    <Input value={v.sku} onChange={(e) => setVariant(i, "sku", e.target.value)} placeholder="Auto / SKU" aria-label="Variation SKU" />
+                    <Input value={v.sku.trim() || (v.size.trim() ? variationSkuPreview(v.size) : "")} readOnly disabled placeholder="Auto" aria-label="Variation SKU" title="System-generated from the product SKU + size" />
                     <Input inputMode="decimal" value={v.price} onChange={(e) => setVariant(i, "price", e.target.value)} placeholder="Inherit" aria-label="Price" />
                     <Input inputMode="decimal" value={v.weight} onChange={(e) => setVariant(i, "weight", e.target.value)} placeholder="—" aria-label="Weight (g)" />
                     <label className="inline-flex items-center gap-1.5 text-sm text-muted">
@@ -383,8 +478,10 @@ export function ProductForm({
                   </div>
                 ))}
                 <p className="text-xs text-faint">
-                  Blank price inherits the product price. Stock per variation is
-                  received/adjusted below — it never changes here.
+                  SKU is system-generated from the product SKU and size (e.g.{" "}
+                  <code>{variationSkuPreview(form.variants.find((v) => v.size.trim())?.size ?? "6")}</code>)
+                  and isn&apos;t editable. Blank price inherits the product price.
+                  Stock per variation is received/adjusted below — it never changes here.
                 </p>
               </div>
             )}
@@ -396,49 +493,26 @@ export function ProductForm({
         )}
 
         <Card>
-          <CardHeader>
-            <CardTitle>Stones</CardTitle>
-            <Button type="button" variant="secondary" size="sm" onClick={addStone}><Plus className="size-4" />Add stone</Button>
-          </CardHeader>
-          <CardBody className="space-y-3">
-            {form.stones.length === 0 && <p className="text-sm text-faint">No stones on this piece.</p>}
-            {form.stones.map((s, i) => (
-              <div key={i} className="grid grid-cols-2 gap-2 sm:grid-cols-[1fr_1fr_1fr_auto_auto]">
-                <Input value={s.type} onChange={(e) => setStone(i, "type", e.target.value)} placeholder="Type (CZ)" />
-                <Input value={s.weight} onChange={(e) => setStone(i, "weight", e.target.value)} placeholder="Weight" />
-                <Input value={s.quality} onChange={(e) => setStone(i, "quality", e.target.value)} placeholder="Quality" />
-                <Input className="w-16" inputMode="numeric" value={s.count} onChange={(e) => setStone(i, "count", e.target.value)} placeholder="Qty" />
-                <Button type="button" variant="ghost" size="icon" onClick={() => rmStone(i)}><Trash2 className="size-4 text-faint" /></Button>
-              </div>
-            ))}
-          </CardBody>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Certificate details</CardTitle>
-            <Button type="button" variant="secondary" size="sm" onClick={addCert}><Plus className="size-4" />Add row</Button>
-          </CardHeader>
-          <CardBody className="space-y-3">
-            {form.certs.length === 0 && <p className="text-sm text-faint">No certificate details.</p>}
-            {form.certs.map((c, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <Input value={c.key} onChange={(e) => setCert(i, "key", e.target.value)} placeholder="Label (BIS)" className="flex-1" />
-                <Input value={c.value} onChange={(e) => setCert(i, "value", e.target.value)} placeholder="Value (Hallmarked)" className="flex-1" />
-                <Button type="button" variant="ghost" size="icon" onClick={() => rmCert(i)}><Trash2 className="size-4 text-faint" /></Button>
-              </div>
-            ))}
-          </CardBody>
-        </Card>
-
-        <Card>
           <CardHeader><CardTitle>Images</CardTitle></CardHeader>
-          <CardBody>
-            {isEdit ? (
-              <ProductMediaManager productId={product!.id} media={product!.media} onChanged={() => onSaved?.()} />
-            ) : (
-              <PendingImagePicker value={pending} onChange={setPending} disabled={saving} />
+          <CardBody className="space-y-4">
+            {isEdit && product!.media.length > 0 && (
+              <ProductMediaManager
+                productId={product!.id}
+                media={product!.media}
+                onChanged={() => onSaved?.()}
+                hideAdd
+                removedIds={removedMedia}
+                onToggleRemove={(id) =>
+                  setRemovedMedia((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(id)) next.delete(id);
+                    else next.add(id);
+                    return next;
+                  })
+                }
+              />
             )}
+            <PendingImagePicker value={pending} onChange={setPending} disabled={saving} />
           </CardBody>
         </Card>
       </div>

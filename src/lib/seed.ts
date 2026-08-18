@@ -5,7 +5,7 @@
  * references stay stable across reseeds. Media keys hold inline-SVG data URIs so
  * the demo renders offline; the backend swaps them for real S3/CDN URLs.
  */
-import { effectivePrice } from "./derive";
+import { effectivePrice, nextSku, variationSku } from "./derive";
 import type { StoredProduct, StoredVariation } from "./internal";
 import type {
   Address,
@@ -240,11 +240,16 @@ const nextCreated = () => {
   return new Date(createdCursor).toISOString();
 };
 
-const skuCounter: Record<string, number> = {};
-function makeSku(metal: MetalType) {
-  const code = { silver: "SLV", gold: "GLD", gold_plated: "GPL", rose_gold: "RGD", antique: "ANT", other: "OTH" }[metal];
-  skuCounter[code] = (skuCounter[code] ?? 0) + 1;
-  return `SOIS-${code}-${String(skuCounter[code]).padStart(4, "0")}`;
+// slug → display name, so seeded SKUs derive the same category code as the app.
+const CAT_NAME_BY_SLUG: Record<string, string> = Object.fromEntries(
+  CATS.map((c) => [c.slug, c.name]),
+);
+// Running list of issued SKUs so seeded codes collide-check exactly like the app.
+const usedSkus: string[] = [];
+function makeSku(metal: MetalType, catSlug: string, purity: string, name: string) {
+  const sku = nextSku(metal, usedSkus, CAT_NAME_BY_SLUG[catSlug], purity, name);
+  usedSkus.push(sku);
+  return sku;
 }
 
 /** Parse "6,7,8" into distinct trimmed sizes; "Adjustable"/blank → no sizes. */
@@ -276,7 +281,7 @@ function distributeSizeStock(
   return sizes.map((size, i) => ({
     size,
     qty: base + (remainder-- > 0 ? 1 : 0),
-    sku: `${sku}-${size}`,
+    sku: variationSku(sku, size),
     price: null, // inherit the product price
     net_weight: Math.round(baseWeight * (1 + i * 0.04) * 1000) / 1000,
     is_active: true,
@@ -288,7 +293,8 @@ function makeProduct(input: PInput): StoredProduct {
   const created = nextCreated();
   const qty = input.qty;
   const status = qty <= 0 ? "out_of_stock" : "active";
-  const sku = makeSku(metal);
+  const purity = input.purity ?? "925 Sterling";
+  const sku = makeSku(metal, input.cat, purity, input.name);
   const netWeight = Math.round((2.5 + Math.random() * 5) * 100) / 100;
   return {
     id: `prod_${slug(input.name)}`,
@@ -304,7 +310,7 @@ function makeProduct(input: PInput): StoredProduct {
     qty,
     status,
     metal_type: metal,
-    purity: input.purity ?? "925 Sterling",
+    purity,
     gross_weight: Math.round((3 + Math.random() * 6) * 100) / 100,
     net_weight: netWeight,
     length_mm: Math.round((10 + Math.random() * 40) * 10) / 10,
@@ -330,7 +336,7 @@ function makeProduct(input: PInput): StoredProduct {
 }
 
 export function buildSeedProducts(): StoredProduct[] {
-  Object.keys(skuCounter).forEach((k) => delete skuCounter[k]);
+  usedSkus.length = 0;
   createdCursor = Date.parse("2026-01-06T10:00:00.000Z");
   return P.map(makeProduct);
 }

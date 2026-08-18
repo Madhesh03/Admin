@@ -26,6 +26,7 @@ import {
   recomputePurchaseOrder,
   slugify,
   stockLevel,
+  variationSku,
 } from "./derive";
 import type { StoredProduct, StoredVariation } from "./internal";
 import {
@@ -192,21 +193,28 @@ function blankVariation(size: string): StoredVariation {
  * metadata (sku/price/weight/active) from `variations` when present. Existing
  * `qty` and untouched metadata are preserved; new sizes default to a blank row;
  * rows for removed sizes are dropped. Mirrors the backend `_reconcile_variations`.
+ *
+ * The variation SKU is always system-derived from the parent SKU and its size
+ * (e.g. `SOIS-RNG-SLV-0001-7`) so every variation is trackable — it is never
+ * taken from the payload.
  */
 function reconcileSizeStocks(
   raw: string,
   existing: StoredVariation[],
-  variations?: VariationInput[],
+  variations: VariationInput[] | undefined,
+  parentSku: string,
 ): StoredVariation[] {
   const bySize = new Map(existing.map((r) => [r.size, r]));
   const meta = new Map((variations ?? []).map((v) => [v.size.trim(), v]));
   return parseSizes(raw).map((size) => {
     const row = bySize.get(size) ?? blankVariation(size);
+    const sku = variationSku(parentSku, size); // always derived, never from input
     const m = meta.get(size);
-    if (!m) return row; // bare size-list edit must not wipe existing metadata
+    // Bare size-list edit: keep existing metadata, only (re)sync the SKU.
+    if (!m) return { ...row, sku };
     return {
       ...row,
-      sku: (m.sku ?? "").trim(),
+      sku,
       price: m.price ?? null,
       net_weight: m.net_weight ?? null,
       is_active: m.is_active ?? true,
@@ -432,6 +440,48 @@ function sizesFromVariations(variations: VariationInput[]): string {
   return parseSizes(variations.map((v) => v.size).join(",")).join(",");
 }
 
+/** Case-insensitive: is `name` already used by another product (excludes `exceptId`)? */
+function productNameTaken(name: string, exceptId?: string): boolean {
+  const key = name.trim().toLowerCase();
+  if (!key) return false;
+  return get("products").some(
+    (p) => p.id !== exceptId && p.name.trim().toLowerCase() === key,
+  );
+}
+
+/** Case-insensitive product-name uniqueness within the store (excludes `exceptId`). */
+function assertUniqueName(name: string, exceptId?: string): void {
+  if (productNameTaken(name, exceptId)) {
+    throw new ApiError(
+      `A product named "${name.trim()}" already exists.`,
+      400,
+      "duplicate_name",
+      { name: ["A product with this name already exists."] },
+    );
+  }
+}
+
+export interface NameCheckResult {
+  name: string;
+  available: boolean;
+}
+
+/**
+ * Live product-name availability check for the create/edit form — lets the UI
+ * flag duplicates as the user types, before uploading images or saving.
+ * `excludeId` ignores the product's own name when editing.
+ */
+export async function checkProductName(
+  name: string,
+  excludeId?: string,
+): Promise<NameCheckResult> {
+  await tick();
+  requirePermission("catalog.view_product");
+  // TODO(backend): fetch(`/catalog/staff/products/check-name/?name=...`)
+  const trimmed = name.trim();
+  return { name: trimmed, available: !!trimmed && !productNameTaken(trimmed, excludeId) };
+}
+
 export async function createProduct(
   input: ProductWriteInput,
 ): Promise<ProductDetail> {
@@ -439,6 +489,7 @@ export async function createProduct(
   requirePermission("catalog.add_product");
   // TODO(backend): fetch("/catalog/staff/products/", { method:"POST", ... })
   const products = get("products");
+  assertUniqueName(input.name);
   const now = new Date().toISOString();
   const baseSlug = slugify(input.name) || "product";
   let slug = baseSlug;
@@ -450,9 +501,18 @@ export async function createProduct(
   const availableSizes = input.variations
     ? sizesFromVariations(input.variations)
     : input.available_sizes ?? "";
+  const purity = input.purity ?? "925 Sterling";
+  // SKU is always system-generated (self-describing, never caller-supplied).
+  const sku = nextSku(
+    input.metal_type,
+    products.map((p) => p.sku),
+    catById(input.category_id ?? null)?.name,
+    purity,
+    input.name,
+  );
   const product: StoredProduct = {
     id: newId(),
-    sku: input.sku?.trim() || nextSku(input.metal_type, products.map((p) => p.sku)),
+    sku,
     name: input.name,
     slug,
     description: input.description ?? "",
@@ -464,7 +524,7 @@ export async function createProduct(
     qty: 0, // stock arrives via purchase orders / adjustments (§ Inventory)
     status: "draft", // create always starts as draft
     metal_type: input.metal_type,
-    purity: input.purity ?? "925 Sterling",
+    purity,
     gross_weight: input.gross_weight ?? null,
     net_weight: input.net_weight ?? null,
     length_mm: input.length_mm ?? null,
@@ -477,7 +537,7 @@ export async function createProduct(
     variant_label: input.variant_label ?? "",
     // New products start at zero stock everywhere; sizes seed variation rows at
     // qty 0, carrying any SKU/price/weight metadata from the variations payload.
-    size_stocks: reconcileSizeStocks(availableSizes, [], input.variations),
+    size_stocks: reconcileSizeStocks(availableSizes, [], input.variations, sku),
     care_instruction: input.care_instruction ?? "",
     is_featured: input.is_featured ?? false,
     tags: input.tags ?? [],
@@ -497,6 +557,7 @@ export async function updateProduct(
   requirePermission("catalog.edit_product");
   // TODO(backend): fetch(`/catalog/staff/products/${id}/`, { method:"PATCH", ... })
   const existing = storedById(id);
+  if (patch.name != null) assertUniqueName(patch.name, id);
   const next: StoredProduct = {
     ...existing,
     ...("name" in patch && patch.name != null ? { name: patch.name } : {}),
@@ -531,6 +592,7 @@ export async function updateProduct(
       next.available_sizes,
       existing.size_stocks,
       patch.variations,
+      next.sku,
     );
   }
   // Keep status honest with stock when not explicitly archived/draft.

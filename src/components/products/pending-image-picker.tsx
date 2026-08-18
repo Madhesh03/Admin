@@ -173,7 +173,7 @@ export function PendingImagePicker({
           </div>
           <p className="flex items-center gap-1.5 text-xs text-muted">
             <Upload className="size-3.5" />
-            {value.length} image{value.length > 1 ? "s" : ""} ready — uploaded automatically once you create the product.
+            {value.length} image{value.length > 1 ? "s" : ""} ready — uploaded automatically when you save.
           </p>
         </>
       )}

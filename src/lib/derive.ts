@@ -47,15 +47,101 @@ const METAL_CODE: Record<MetalType, string> = {
   other: "OTH",
 };
 
-/** Auto SKU when omitted: SOIS-<metal>-<zero-padded sequence>. */
+const SKU_BRAND = "SOIS";
+/** Category segment when a product has no category assigned. */
+const CATEGORY_FALLBACK = "GEN";
+
+/**
+ * 3-letter category segment for a SKU, derived from the category name.
+ * Deterministic so the same category always maps to the same code:
+ * multi-word names use word initials (e.g. "Rose Gold" → "RGO"), single
+ * words use their first three letters ("Rings" → "RIN"). Falls back to GEN.
+ */
+export function categoryCode(categoryName: string | null | undefined): string {
+  const cleaned = (categoryName ?? "").replace(/[^a-zA-Z ]+/g, " ").trim();
+  if (!cleaned) return CATEGORY_FALLBACK;
+  const words = cleaned.split(/\s+/);
+  const raw =
+    words.length > 1
+      ? words.map((w) => w[0]).join("")
+      : words[0];
+  return raw.slice(0, 3).toUpperCase().padEnd(3, "X");
+}
+
+/** Digits pulled from a purity string: "925 Sterling" → "925", "22K" → "22". */
+export function purityCode(purity: string | null | undefined): string {
+  return (purity ?? "").replace(/[^0-9]/g, "").slice(0, 3);
+}
+
+/**
+ * Short, readable code for a product name — the self-describing tail of the SKU.
+ * Multi-word names use word initials (e.g. "Celestial Stack Ring" → "CSR",
+ * capped at 4); single words use their first three letters ("Solitaire" →
+ * "SOL"). Falls back to ITM for an empty name.
+ */
+export function nameCode(name: string | null | undefined): string {
+  const cleaned = (name ?? "").replace(/[^a-zA-Z ]+/g, " ").trim();
+  if (!cleaned) return "ITM";
+  const words = cleaned.split(/\s+/);
+  if (words.length === 1) return words[0].slice(0, 3).toUpperCase().padEnd(3, "X");
+  return words.map((w) => w[0]).join("").slice(0, 4).toUpperCase();
+}
+
+/**
+ * Self-describing SKU stem: `SOIS-<category>-<metal><purity>`
+ * (e.g. `SOIS-RNG-SLV925`). The product-name code is appended to form the full
+ * SKU. Purity is omitted from the metal segment when the string has no digits.
+ */
+export function skuStem(
+  metalType: MetalType,
+  categoryName?: string | null,
+  purity?: string | null,
+): string {
+  return `${SKU_BRAND}-${categoryCode(categoryName)}-${METAL_CODE[metalType]}${purityCode(purity)}`;
+}
+
+/**
+ * Self-describing auto SKU: `SOIS-<category>-<metal><purity>-<name>`
+ * (e.g. `SOIS-RNG-SLV925-CSR`) — no running sequence, so the code reads as the
+ * product itself. When two pieces resolve to the same code a `-2`, `-3`… is
+ * appended to keep it unique within the store.
+ */
 export function nextSku(
   metalType: MetalType,
   existingSkus: string[],
+  categoryName?: string | null,
+  purity?: string | null,
+  name?: string | null,
 ): string {
-  const prefix = `SOIS-${METAL_CODE[metalType]}`;
-  const n =
-    existingSkus.filter((s) => s.startsWith(prefix)).length + 1;
-  return `${prefix}-${String(n).padStart(4, "0")}`;
+  const base = `${skuStem(metalType, categoryName, purity)}-${nameCode(name)}`;
+  const taken = new Set(existingSkus);
+  if (!taken.has(base)) return base;
+  let n = 2;
+  while (taken.has(`${base}-${n}`)) n++;
+  return `${base}-${n}`;
+}
+
+/**
+ * SKU-safe code for a variation value: uppercased, with any run of
+ * non-alphanumerics collapsed to a single "-" (so "6.5" → "6-5", "US 7" →
+ * "US-7"). Keeps distinct sizes distinct inside the SKU.
+ */
+export function sizeCode(size: string): string {
+  return size
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/**
+ * Auto variation SKU derived from its parent: `<parentSku>-<sizeCode>`
+ * (e.g. `SOIS-RNG-SLV925-CSR-7`). Returns the bare parent SKU when the size has
+ * no usable characters so we never emit a dangling trailing dash.
+ */
+export function variationSku(parentSku: string, size: string): string {
+  const code = sizeCode(size);
+  return code ? `${parentSku}-${code}` : parentSku;
 }
 
 /** PO-YYYY-000N based on how many POs already exist. */

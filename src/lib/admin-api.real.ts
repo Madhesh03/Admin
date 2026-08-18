@@ -65,6 +65,7 @@ import type {
   ListOrdersParams,
   ListProductsParams,
   ListReturnsParams,
+  NameCheckResult,
   PresignInput,
   ProductWriteInput,
   PurchaseOrderCreateInput,
@@ -123,6 +124,16 @@ export function bulkUpdateProducts(
 
 export function archiveProduct(id: string): Promise<void> {
   return apiDelete(`/catalog/staff/products/${id}/`);
+}
+
+export function checkProductName(
+  name: string,
+  excludeId?: string,
+): Promise<NameCheckResult> {
+  return apiGet<NameCheckResult>("/catalog/staff/products/check-name/", {
+    name,
+    exclude_id: excludeId,
+  });
 }
 
 /* -------- Media ---------------------------------------------------------- */

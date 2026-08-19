@@ -58,7 +58,13 @@ const PAYMENT_CLASS: Record<PaymentStatus, string> = {
   partially_refunded: AMBER,
 };
 
-export function PaymentBadge({ status }: { status: PaymentStatus }) {
+/**
+ * `status` is nullable: the backend derives it from the latest Payment row and
+ * returns null for orders that never reached the gateway (e.g. cancelled on the
+ * payment-window sweep). Those render as a neutral "Unpaid" chip.
+ */
+export function PaymentBadge({ status }: { status: PaymentStatus | null }) {
+  if (!status) return <Badge className={GREY}>Unpaid</Badge>;
   return <Badge className={PAYMENT_CLASS[status]}>{titleCase(status)}</Badge>;
 }
 
@@ -107,6 +113,7 @@ const SHIP_CLASS: Record<ShipmentStatus, string> = {
   delivered: GREEN,
   failed: RED,
   returned: PURPLE,
+  cancelled: GREY,
 };
 export function ShipmentStatusBadge({ status }: { status: ShipmentStatus }) {
   return <Badge className={SHIP_CLASS[status]}>{titleCase(status)}</Badge>;

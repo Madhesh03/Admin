@@ -30,7 +30,9 @@ import type {
   StockLedgerEntry,
   StoneDetail,
   Supplier,
+  NotificationLog,
 } from "./types";
+import { COURIER_LABEL } from "./types";
 
 /* -------------------------------------------------------------------------- */
 /* Placeholder imagery                                                        */
@@ -629,6 +631,37 @@ export function buildSeedReturns(): Return[] {
 /* Shipments                                                                  */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Fields every shipment now carries (courier identity, parcel dimensions,
+ * documents, sync state). Defaulted here so the seed rows below stay readable
+ * and only state what differs between them.
+ */
+type SeedShipment = Omit<
+  Shipment,
+  | "courier_id" | "courier_name"
+  | "length_cm" | "breadth_cm" | "height_cm" | "freight_charge"
+  | "pickup_scheduled_at" | "pickup_token"
+  | "label_url" | "manifest_url" | "last_synced_at"
+> &
+  Partial<Shipment>;
+
+function completeShipment(s: SeedShipment): Shipment {
+  return {
+    courier_id: "",
+    courier_name: COURIER_LABEL[s.courier],
+    length_cm: 16,
+    breadth_cm: 12,
+    height_cm: 6,
+    freight_charge: null,
+    pickup_scheduled_at: null,
+    pickup_token: "",
+    label_url: "",
+    manifest_url: "",
+    last_synced_at: s.updated_at,
+    ...s,
+  };
+}
+
 export function buildSeedShipments(): Shipment[] {
   const ev = (id: string, status: string, description: string, location: string, ts: string): Shipment["events"][number] => ({
     id,
@@ -637,11 +670,12 @@ export function buildSeedShipments(): Shipment[] {
     location,
     timestamp: iso(ts),
   });
-  return [
+  const rows: SeedShipment[] = [
     {
       id: "ship_2", order_id: "order_2", order_number: "SOIS-2026-0002",
       shiprocket_order_id: "SR100002", shiprocket_shipment_id: "SRS100002",
-      courier: "delhivery", awb: "DL5566778899", status: "in_transit",
+      courier: "delhivery", courier_id: "13", courier_name: "Delhivery Surface",
+      awb: "DL5566778899", status: "in_transit", freight_charge: 74,
       tracking_url: "https://track.delhivery.com/DL5566778899",
       estimated_delivery: iso("2026-07-05"), delivered_at: null, weight_kg: 0.5,
       events: [
@@ -654,7 +688,8 @@ export function buildSeedShipments(): Shipment[] {
     {
       id: "ship_1", order_id: "order_1", order_number: "SOIS-2026-0001",
       shiprocket_order_id: "SR100001", shiprocket_shipment_id: "SRS100001",
-      courier: "bluedart", awb: "BD1029384756", status: "delivered",
+      courier: "bluedart", courier_id: "3", courier_name: "Bluedart Air",
+      awb: "BD1029384756", status: "delivered", freight_charge: 118,
       tracking_url: "https://bluedart.com/BD1029384756",
       estimated_delivery: iso("2026-05-07"), delivered_at: iso("2026-05-06T14:30:00Z"), weight_kg: 0.4,
       events: [
@@ -668,7 +703,8 @@ export function buildSeedShipments(): Shipment[] {
     {
       id: "ship_6", order_id: "order_6", order_number: "SOIS-2026-0006",
       shiprocket_order_id: "SR100006", shiprocket_shipment_id: "SRS100006",
-      courier: "dtdc", awb: "DT9081726354", status: "delivered",
+      courier: "dtdc", courier_id: "6", courier_name: "DTDC Surface",
+      awb: "DT9081726354", status: "delivered", freight_charge: 68,
       tracking_url: "https://dtdc.in/DT9081726354",
       estimated_delivery: iso("2026-04-05"), delivered_at: iso("2026-04-04T11:00:00Z"), weight_kg: 0.6,
       events: [
@@ -677,6 +713,54 @@ export function buildSeedShipments(): Shipment[] {
       ],
       created_at: iso("2026-03-30T16:00:00Z"), updated_at: iso("2026-04-04T11:00:00Z"),
     },
+  ];
+  return rows.map(completeShipment);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Notification log                                                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * What the customer was told, and whether it landed. Includes one failed row
+ * on purpose — a silently-failed shipping email is exactly the case this
+ * screen exists to make visible.
+ */
+export function buildSeedNotifications(): NotificationLog[] {
+  let i = 0;
+  const log = (
+    orderId: string,
+    orderNumber: string,
+    event: NotificationLog["event_type"],
+    channel: NotificationLog["channel"],
+    status: NotificationLog["status"],
+    ts: string,
+    error = "",
+  ): NotificationLog => ({
+    id: `ntf_${++i}`,
+    channel,
+    event_type: event,
+    recipient_email: channel === "email" ? "aarti.desai@example.com" : "",
+    recipient_phone: channel === "whatsapp" ? "+919812345670" : "",
+    order_id: orderId,
+    order_number: orderNumber,
+    status,
+    error,
+    provider_message_id: status === "sent" && channel === "whatsapp" ? `wamid.${i}` : "",
+    sent_at: status === "sent" ? iso(ts) : null,
+    created_at: iso(ts),
+  });
+
+  return [
+    log("order_2", "SOIS-2026-0002", "order_placed", "email", "sent", "2026-06-24T10:05:00Z"),
+    log("order_2", "SOIS-2026-0002", "order_placed", "whatsapp", "sent", "2026-06-24T10:05:00Z"),
+    log("order_2", "SOIS-2026-0002", "payment_confirmed", "email", "sent", "2026-06-24T10:06:00Z"),
+    log("order_2", "SOIS-2026-0002", "order_shipped", "email", "failed", "2026-06-26T09:02:00Z",
+        "SMTPRecipientsRefused: mailbox unavailable"),
+    log("order_2", "SOIS-2026-0002", "order_shipped", "whatsapp", "sent", "2026-06-26T09:02:00Z"),
+    log("order_1", "SOIS-2026-0001", "order_placed", "email", "sent", "2026-05-01T09:20:00Z"),
+    log("order_1", "SOIS-2026-0001", "order_shipped", "email", "sent", "2026-05-02T10:05:00Z"),
+    log("order_1", "SOIS-2026-0001", "order_delivered", "email", "sent", "2026-05-06T14:35:00Z"),
   ];
 }
 

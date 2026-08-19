@@ -6,8 +6,19 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-/** Format an INR integer-rupee amount, e.g. 1299 -> "₹1,299". (Brief §7) */
-export const formatPrice = (v: number) => `₹${v.toLocaleString("en-IN")}`;
+/**
+ * Format an INR amount, e.g. 1299 -> "₹1,299". (Brief §7)
+ *
+ * Accepts a string too: DRF serialises DecimalField as a JSON string
+ * ("4499.10"), so real-backend payloads arrive as strings even where the
+ * contract types say `number`. Coercing here keeps grouping/rounding correct
+ * instead of silently falling through to String.prototype.toLocaleString.
+ */
+export const formatPrice = (v: number | string | null | undefined) => {
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+};
 
 /** Human date, e.g. "3 Jul 2026". Accepts ISO string. */
 export function formatDate(iso: string | null | undefined) {

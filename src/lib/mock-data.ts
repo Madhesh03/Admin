@@ -5,6 +5,7 @@
  */
 import {
   buildSeedLedger,
+  buildSeedNotifications,
   buildSeedOrders,
   buildSeedProducts,
   buildSeedPurchaseOrders,
@@ -22,6 +23,7 @@ import type { StoredProduct } from "./internal";
 import type {
   Category,
   Collection,
+  NotificationLog,
   Order,
   PurchaseOrder,
   Refund,
@@ -38,7 +40,7 @@ import type {
 const KEY = (name: string) => `sois_admin_${name}`;
 export const SESSION_KEY = KEY("session");
 const VERSION_KEY = KEY("version");
-const SEED_VERSION = "2";
+const SEED_VERSION = "3";
 
 const isBrowser = () => typeof window !== "undefined";
 
@@ -72,6 +74,7 @@ interface DB {
   returns: Return[];
   refunds: Refund[];
   shipments: Shipment[];
+  notifications: NotificationLog[];
   staff: StaffUser[];
   roles: Role[];
 }
@@ -94,6 +97,7 @@ function freshSeed(): DB {
     returns: buildSeedReturns(),
     refunds: buildSeedRefunds(),
     shipments: buildSeedShipments(),
+    notifications: buildSeedNotifications(),
     staff: SEED_STAFF,
     roles: SEED_ROLES,
   };

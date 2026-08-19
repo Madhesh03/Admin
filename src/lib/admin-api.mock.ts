@@ -59,8 +59,14 @@ import type {
   Refund,
   Return,
   Review,
+  CourierRate,
+  NotificationChannel,
+  NotificationEventType,
+  NotificationLog,
+  NotificationStatus,
   Shipment,
   ShipmentEvent,
+  ShipmentStatus,
   StaffUser,
   StockLedgerEntry,
   StockType,
@@ -1392,11 +1398,18 @@ export async function adjustStock(
 /* ORDERS                                                                      */
 /* -------------------------------------------------------------------------- */
 
+export type OrderOrdering =
+  | "created_at" | "-created_at"
+  | "total_amount" | "-total_amount"
+  | "order_number" | "-order_number"
+  | "status" | "-status";
+
 export interface ListOrdersParams {
   status?: OrderStatus | "all";
   search?: string;
   from?: string;
   to?: string;
+  ordering?: OrderOrdering;
   page?: number;
   page_size?: number;
 }
@@ -1415,7 +1428,9 @@ export async function listOrders(
       (o) =>
         o.order_number.toLowerCase().includes(q) ||
         o.customer_email.toLowerCase().includes(q) ||
-        (o.customer_name ?? "").toLowerCase().includes(q),
+        (o.customer_name ?? "").toLowerCase().includes(q) ||
+        o.shipping_address.full_name.toLowerCase().includes(q) ||
+        o.shipping_address.phone.toLowerCase().includes(q),
     );
   if (params.from) {
     const from = new Date(params.from).getTime();
@@ -1425,8 +1440,24 @@ export async function listOrders(
     const to = new Date(params.to).getTime() + 86_400_000 - 1;
     list = list.filter((o) => new Date(o.created_at).getTime() <= to);
   }
-  list.sort((a, b) => b.created_at.localeCompare(a.created_at));
+  sortOrders(list, params.ordering ?? "-created_at");
   return clone(paginate(list, params.page, params.page_size));
+}
+
+/** Mirrors the backend's whitelist of `ordering` values. */
+function sortOrders(list: Order[], ordering: OrderOrdering): void {
+  const desc = ordering.startsWith("-");
+  const field = (desc ? ordering.slice(1) : ordering) as
+    | "created_at" | "total_amount" | "order_number" | "status";
+  list.sort((a, b) => {
+    const x = a[field];
+    const y = b[field];
+    const cmp =
+      typeof x === "number" && typeof y === "number"
+        ? x - y
+        : String(x).localeCompare(String(y));
+    return desc ? -cmp : cmp;
+  });
 }
 
 export async function getOrder(id: string): Promise<Order | null> {
@@ -1697,13 +1728,25 @@ export async function initiateRefund(
 /* SHIPPING                                                                    */
 /* -------------------------------------------------------------------------- */
 
+export interface ListShipmentsParams {
+  status?: ShipmentStatus;
+  /** Shipments for one order — used by the order screen. */
+  order_id?: string;
+  awb?: string;
+}
+
 export async function listShipments(
-  params: { status?: Shipment["status"] } = {},
+  params: ListShipmentsParams = {},
 ): Promise<Shipment[]> {
   await tick();
   requirePermission("shipping.manage_shipment");
   let list = get("shipments").slice();
   if (params.status) list = list.filter((s) => s.status === params.status);
+  if (params.order_id) list = list.filter((s) => s.order_id === params.order_id);
+  if (params.awb) {
+    const q = params.awb.toLowerCase();
+    list = list.filter((s) => s.awb.toLowerCase().includes(q));
+  }
   return clone(list.sort((a, b) => b.created_at.localeCompare(a.created_at)));
 }
 
@@ -1713,42 +1756,192 @@ export async function getShipment(id: string): Promise<Shipment | null> {
   return clone(get("shipments").find((s) => s.id === id) ?? null);
 }
 
+/** The live shipment for an order: newest one that isn't cancelled. */
+function liveShipmentFor(orderId: string): Shipment | undefined {
+  return get("shipments")
+    .filter((s) => s.order_id === orderId && s.status !== "cancelled")
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
+}
+
+export interface CourierRatesParams {
+  order_id: string;
+  weight_kg: number;
+  length_cm?: number;
+  breadth_cm?: number;
+  height_cm?: number;
+  cod?: boolean;
+}
+
+/** Mirrors the backend's SHIPROCKET_GST_RATE default. */
+const MOCK_GST_RATE = 18;
+
+/**
+ * Stand-in for Shiprocket's serviceability rate card. Prices are derived from
+ * the parcel's billable weight (the greater of dead and volumetric weight, the
+ * same rule couriers bill on) so the demo reacts to the weight/dimension inputs
+ * the way the real endpoint does.
+ *
+ * Like the real card, `rate` is quoted net of tax and `rate_with_gst` is what
+ * the booking costs — the demo would otherwise understate every price by 18%.
+ */
+export async function listCourierRates(
+  params: CourierRatesParams,
+): Promise<CourierRate[]> {
+  await tick(true);
+  requirePermission("shipping.manage_shipment");
+  const order = get("orders").find((o) => o.id === params.order_id);
+  if (!order) throw new ApiError("Order not found", 404);
+
+  const l = params.length_cm || 10;
+  const b = params.breadth_cm || 10;
+  const h = params.height_cm || 5;
+  // Volumetric divisor 5000 is the Indian courier standard.
+  const billable = Math.max(params.weight_kg || 0.5, (l * b * h) / 5000);
+
+  const catalogue: Array<{
+    id: string; name: string; courier: Courier;
+    base: number; perKg: number; days: number; rating: number; surface: boolean;
+  }> = [
+    { id: "13", name: "Delhivery Surface", courier: "delhivery", base: 42, perKg: 34, days: 4, rating: 4.4, surface: true },
+    { id: "51", name: "Xpressbees Surface", courier: "other", base: 39, perKg: 32, days: 5, rating: 4.1, surface: true },
+    { id: "6", name: "DTDC Surface", courier: "dtdc", base: 45, perKg: 36, days: 4, rating: 3.9, surface: true },
+    { id: "14", name: "Delhivery Air", courier: "delhivery", base: 68, perKg: 58, days: 2, rating: 4.6, surface: false },
+    { id: "3", name: "Bluedart Air", courier: "bluedart", base: 92, perKg: 74, days: 1, rating: 4.8, surface: false },
+    { id: "27", name: "Ekart Surface", courier: "other", base: 41, perKg: 33, days: 5, rating: 4.0, surface: true },
+  ];
+
+  const codFee = params.cod ? 35 : 0;
+  const rows: CourierRate[] = catalogue.map((c) => {
+    const freight = Math.round((c.base + c.perKg * Math.max(0, billable - 0.5)) * 100) / 100;
+    const other = Math.round(freight * 0.05 * 100) / 100;
+    const eta = new Date(Date.now() + c.days * 86_400_000);
+    const rate = Math.round((freight + other + codFee) * 100) / 100;
+    const gstAmount = Math.round(rate * MOCK_GST_RATE) / 100;
+    return {
+      courier_id: c.id,
+      courier_name: c.name,
+      courier: c.courier,
+      rate,
+      freight_charge: freight,
+      cod_charges: codFee,
+      other_charges: other,
+      gst_rate: MOCK_GST_RATE,
+      gst_amount: gstAmount,
+      rate_with_gst: Math.round((rate + gstAmount) * 100) / 100,
+      estimated_delivery_days: String(c.days),
+      etd: eta.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }),
+      rating: c.rating,
+      is_surface: c.surface,
+      call_before_delivery: "",
+      is_recommended: c.id === "13",
+      extra_over_cheapest: 0,
+      is_cheapest: false,
+      is_fastest: false,
+    };
+  });
+
+  rows.sort((a, b2) => a.rate - b2.rate || a.courier_name.localeCompare(b2.courier_name));
+  // Compare tax-inclusive, as the backend does — a flat GST keeps the order.
+  const cheapest = rows[0].rate_with_gst;
+  const fastest = Math.min(...rows.map((r) => Number(r.estimated_delivery_days)));
+  for (const r of rows) {
+    r.extra_over_cheapest = Math.round((r.rate_with_gst - cheapest) * 100) / 100;
+    r.is_cheapest = r.rate_with_gst === cheapest;
+    r.is_fastest = Number(r.estimated_delivery_days) === fastest;
+  }
+  return clone(rows);
+}
+
+export interface CreateShipmentInput {
+  order_id: string;
+  /** Shiprocket courier_company_id from the rate card. */
+  courier_id?: string;
+  courier_name?: string;
+  courier?: Courier;
+  /** Quoted rate at the moment of choosing — stored for audit. */
+  freight_charge?: number | null;
+  weight_kg: number;
+  length_cm: number;
+  breadth_cm: number;
+  height_cm: number;
+  cod?: boolean;
+}
+
+const COURIER_FAMILY_KEYWORDS: Array<[string, Courier]> = [
+  ["bluedart", "bluedart"],
+  ["blue dart", "bluedart"],
+  ["delhivery", "delhivery"],
+  ["dtdc", "dtdc"],
+];
+
+function resolveCourierFamily(name: string): Courier {
+  const lowered = (name || "").toLowerCase();
+  return COURIER_FAMILY_KEYWORDS.find(([k]) => lowered.includes(k))?.[1] ?? "other";
+}
+
+/**
+ * Book the parcel with the chosen courier.
+ *
+ * The order stays in "processing": an AWB is a label, not a departure. It
+ * advances to "shipped" on the courier's own pick-up scan, which arrives via
+ * the Shiprocket webhook (mirrored here by `syncShipment`).
+ */
 export async function createShipment(
-  orderId: string,
-  courier: Courier = "delhivery",
-  weightKg = 0.5,
+  input: CreateShipmentInput,
 ): Promise<Shipment> {
   await tick(true);
   requirePermission("shipping.manage_shipment");
-  // TODO(backend): fetch("/shipping/staff/shipments/", { method:"POST", ... }) — books Shiprocket
-  const order = get("orders").find((o) => o.id === orderId);
+  const order = get("orders").find((o) => o.id === input.order_id);
   if (!order) throw new ApiError("Order not found", 404);
   if (order.status !== "processing")
     throw new ApiError("Order must be in processing to create a shipment");
+  if (liveShipmentFor(order.id))
+    throw new ApiError(
+      "Order already has an active shipment. Cancel it before booking again.",
+    );
+
   const now = new Date().toISOString();
-  const awb = `${courier.slice(0, 2).toUpperCase()}${Math.floor(1e9 + Math.random() * 8e9)}`;
+  const courierName = input.courier_name || "Delhivery Surface";
+  const family = input.courier || resolveCourierFamily(courierName);
+  const awb = `${family.slice(0, 2).toUpperCase()}${Math.floor(1e9 + Math.random() * 8e9)}`;
   const shipment: Shipment = {
     id: newId(),
     order_id: order.id,
     order_number: order.order_number,
     shiprocket_order_id: `SR${Math.floor(100000 + Math.random() * 899999)}`,
     shiprocket_shipment_id: `SRS${Math.floor(100000 + Math.random() * 899999)}`,
-    courier,
+    courier: family,
+    courier_id: input.courier_id ?? "",
+    courier_name: courierName,
     awb,
     status: "booked",
     tracking_url: `https://track.example.com/${awb}`,
     estimated_delivery: new Date(Date.now() + 5 * 86_400_000).toISOString(),
     delivered_at: null,
-    weight_kg: weightKg,
+    weight_kg: input.weight_kg,
+    length_cm: input.length_cm,
+    breadth_cm: input.breadth_cm,
+    height_cm: input.height_cm,
+    freight_charge: input.freight_charge ?? null,
+    pickup_scheduled_at: null,
+    pickup_token: "",
+    label_url: "",
+    manifest_url: "",
+    last_synced_at: now,
     events: [
-      { id: newId(), status: "booked", description: "Shipment booked with Shiprocket", location: order.shipping_address.city, timestamp: now },
+      {
+        id: newId(),
+        status: "booked",
+        description: `AWB assigned — ${courierName}`,
+        location: order.shipping_address.city,
+        timestamp: now,
+      },
     ],
     created_at: now,
     updated_at: now,
   };
   set("shipments", [shipment, ...get("shipments")]);
-  // Booking a shipment advances the order to shipped.
-  writeOrder({ ...order, status: "shipped", updated_at: now });
+  logNotification(order, "order_packed");
   return clone(shipment);
 }
 
@@ -1761,19 +1954,95 @@ function writeShipment(next: Shipment): Shipment {
   return copy[i];
 }
 
-const SYNC_NEXT: Record<string, Shipment["status"]> = {
+function requireShipment(id: string): Shipment {
+  const s = get("shipments").find((x) => x.id === id);
+  if (!s) throw new ApiError("Shipment not found", 404);
+  return s;
+}
+
+/** Retry AWB assignment for a booking Shiprocket couldn't issue one for. */
+export async function assignAwb(id: string): Promise<Shipment> {
+  await tick(true);
+  requirePermission("shipping.manage_shipment");
+  const s = requireShipment(id);
+  if (s.awb) return clone(s);
+  const awb = `${s.courier.slice(0, 2).toUpperCase()}${Math.floor(1e9 + Math.random() * 8e9)}`;
+  return clone(
+    writeShipment({
+      ...s,
+      awb,
+      status: "booked",
+      tracking_url: `https://track.example.com/${awb}`,
+      events: [
+        ...s.events,
+        {
+          id: newId(),
+          status: "booked",
+          description: `AWB assigned — ${s.courier_name}`,
+          location: "",
+          timestamp: new Date().toISOString(),
+        },
+      ],
+    }),
+  );
+}
+
+export async function schedulePickup(id: string): Promise<Shipment> {
+  await tick(true);
+  requirePermission("shipping.manage_shipment");
+  const s = requireShipment(id);
+  if (!s.awb) throw new ApiError("Assign an AWB before scheduling a pickup.");
+  if (s.status !== "pending" && s.status !== "booked")
+    throw new ApiError(`Cannot schedule a pickup for a "${s.status}" shipment`);
+  return clone(
+    writeShipment({
+      ...s,
+      pickup_scheduled_at: new Date().toISOString(),
+      pickup_token: `PKT${Math.floor(100000 + Math.random() * 899999)}`,
+    }),
+  );
+}
+
+export async function generateLabel(id: string): Promise<Shipment> {
+  await tick(true);
+  requirePermission("shipping.manage_shipment");
+  const s = requireShipment(id);
+  if (!s.awb) throw new ApiError("Assign an AWB before generating a label.");
+  return clone(
+    writeShipment({ ...s, label_url: `https://labels.example.com/${s.awb}.pdf` }),
+  );
+}
+
+export async function generateManifest(id: string): Promise<Shipment> {
+  await tick(true);
+  requirePermission("shipping.manage_shipment");
+  const s = requireShipment(id);
+  if (!s.awb) throw new ApiError("Assign an AWB before generating a manifest.");
+  return clone(
+    writeShipment({
+      ...s,
+      manifest_url: `https://manifests.example.com/${s.awb}.pdf`,
+    }),
+  );
+}
+
+const SYNC_NEXT: Record<string, ShipmentStatus> = {
+  pending: "booked",
   booked: "picked_up",
   picked_up: "in_transit",
   in_transit: "out_for_delivery",
   out_for_delivery: "delivered",
 };
 
+/**
+ * Stands in for a Shiprocket tracking webhook: advances the shipment one step
+ * and lets the order follow, exactly as `_apply_tracking_update` does server
+ * side — pick-up marks the order shipped, delivery marks it delivered.
+ */
 export async function syncShipment(id: string): Promise<Shipment> {
   await tick(true);
   requirePermission("shipping.manage_shipment");
-  // TODO(backend): fetch(`/shipping/staff/shipments/${id}/sync/`, { method:"POST" })
-  const s = get("shipments").find((x) => x.id === id);
-  if (!s) throw new ApiError("Shipment not found", 404);
+  const s = requireShipment(id);
   const next = SYNC_NEXT[s.status];
   if (!next) throw new ApiError("Nothing to sync — shipment is in a terminal state");
   const now = new Date().toISOString();
@@ -1788,13 +2057,25 @@ export async function syncShipment(id: string): Promise<Shipment> {
     ...s,
     status: next,
     delivered_at: next === "delivered" ? now : s.delivered_at,
+    last_synced_at: now,
     events: [...s.events, event],
   });
-  // Delivered shipment advances the order.
-  if (next === "delivered") {
-    const order = get("orders").find((o) => o.id === s.order_id);
-    if (order && order.status === "shipped")
-      writeOrder({ ...order, status: "delivered", updated_at: now });
+
+  const order = get("orders").find((o) => o.id === s.order_id);
+  if (order) {
+    // Pick-up is the first moment "shipped" is actually true.
+    if (next === "picked_up" && order.status === "processing") {
+      writeOrder({ ...order, status: "shipped", updated_at: now });
+      logNotification(order, "order_shipped");
+    } else if (next === "out_for_delivery") {
+      logNotification(order, "out_for_delivery");
+    } else if (next === "delivered") {
+      const current = get("orders").find((o) => o.id === s.order_id)!;
+      if (current.status === "shipped") {
+        writeOrder({ ...current, status: "delivered", updated_at: now });
+        logNotification(current, "order_delivered");
+      }
+    }
   }
   return clone(updated);
 }
@@ -1802,20 +2083,92 @@ export async function syncShipment(id: string): Promise<Shipment> {
 export async function cancelShipment(id: string): Promise<Shipment> {
   await tick(true);
   requirePermission("shipping.manage_shipment");
-  const s = get("shipments").find((x) => x.id === id);
-  if (!s) throw new ApiError("Shipment not found", 404);
-  if (["in_transit", "out_for_delivery", "delivered"].includes(s.status))
+  const s = requireShipment(id);
+  if (s.status !== "booked" && s.status !== "pending")
     throw new ApiError(`Cannot cancel a shipment that is "${s.status}"`);
   const now = new Date().toISOString();
   return clone(
     writeShipment({
       ...s,
-      status: "failed",
+      status: "cancelled",
       events: [
         ...s.events,
-        { id: newId(), status: "failed", description: "Cancelled by staff", location: "", timestamp: now },
+        { id: newId(), status: "cancelled", description: "Cancelled by staff", location: "", timestamp: now },
       ],
     }),
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* NOTIFICATIONS                                                               */
+/* -------------------------------------------------------------------------- */
+
+export interface ListNotificationsParams {
+  order_id?: string;
+  channel?: NotificationChannel;
+  status?: NotificationStatus;
+  page?: number;
+  page_size?: number;
+}
+
+export async function listNotifications(
+  params: ListNotificationsParams = {},
+): Promise<Page<NotificationLog>> {
+  await tick();
+  requirePermission("orders.view_order");
+  let list = get("notifications").slice();
+  if (params.order_id) list = list.filter((n) => n.order_id === params.order_id);
+  if (params.channel) list = list.filter((n) => n.channel === params.channel);
+  if (params.status) list = list.filter((n) => n.status === params.status);
+  list.sort((a, b) => b.created_at.localeCompare(a.created_at));
+  return clone(paginate(list, params.page, params.page_size ?? 50));
+}
+
+/** Append a log row for an event the seam just triggered. */
+function logNotification(
+  order: Order,
+  event: NotificationEventType,
+  channels: NotificationChannel[] = ["email", "whatsapp"],
+): NotificationLog[] {
+  const now = new Date().toISOString();
+  const rows: NotificationLog[] = channels.map((channel) => ({
+    id: newId(),
+    channel,
+    event_type: event,
+    recipient_email: channel === "email" ? order.customer_email : "",
+    recipient_phone: channel === "whatsapp" ? order.shipping_address.phone : "",
+    order_id: order.id,
+    order_number: order.order_number,
+    status: "sent",
+    error: "",
+    provider_message_id: channel === "whatsapp" ? `wamid.${newId()}` : "",
+    sent_at: now,
+    created_at: now,
+  }));
+  set("notifications", [...rows, ...get("notifications")]);
+  return rows;
+}
+
+export interface ResendNotificationInput {
+  order_id: string;
+  event_type: NotificationEventType;
+  /** Omit to send on every channel. */
+  channel?: NotificationChannel;
+}
+
+export async function resendNotification(
+  input: ResendNotificationInput,
+): Promise<NotificationLog[]> {
+  await tick(true);
+  requirePermission("orders.update_order_status");
+  const order = get("orders").find((o) => o.id === input.order_id);
+  if (!order) throw new ApiError("Order not found", 404);
+  return clone(
+    logNotification(
+      order,
+      input.event_type,
+      input.channel ? [input.channel] : ["email", "whatsapp"],
+    ),
   );
 }
 

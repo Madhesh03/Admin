@@ -57,6 +57,11 @@ export type PaymentStatus =
 
 export type RefundStatus = "initiated" | "processed" | "failed";
 
+/**
+ * `pending`   — Shiprocket order created but no AWB yet (retry assign-awb)
+ * `booked`    — AWB assigned, label exists, parcel not yet collected
+ * `cancelled` — booking withdrawn; the order can be re-booked elsewhere
+ */
 export type ShipmentStatus =
   | "pending"
   | "booked"
@@ -65,8 +70,15 @@ export type ShipmentStatus =
   | "out_for_delivery"
   | "delivered"
   | "failed"
-  | "returned";
+  | "returned"
+  | "cancelled";
 
+/**
+ * Coarse courier family, for filtering and badges only. The courier actually
+ * chosen off the Shiprocket rate card lives in `Shipment.courier_name` —
+ * Shiprocket exposes ~170 services, so anything unnamed here lands on "other".
+ * Use `courierLabel()` for display.
+ */
 export type Courier = "bluedart" | "delhivery" | "dtdc" | "other";
 
 export type PurchaseOrderStatus =
@@ -388,7 +400,13 @@ export interface Order {
   customer_email: string;
   customer_name?: string; // convenience for staff UI (from shipping address)
   status: OrderStatus;
-  payment_status: PaymentStatus;
+  /**
+   * Latest payment attempt for the order, or `null` when none exists yet
+   * (order created but never taken to Razorpay, or auto-cancelled on the
+   * payment-window sweep). The real backend derives this from the Payment
+   * table and returns null for such orders, so every consumer must handle it.
+   */
+  payment_status: PaymentStatus | null;
   shipping_address: Address;
   subtotal: number;
   discount_amount: number;
@@ -469,15 +487,106 @@ export interface Shipment {
   shiprocket_order_id: string;
   shiprocket_shipment_id: string;
   courier: Courier;
+  /** Shiprocket courier_company_id chosen from the rate card. */
+  courier_id: string;
+  /** Rate-card display name, e.g. "Delhivery Surface". Prefer this in the UI. */
+  courier_name: string;
   awb: string;
   status: ShipmentStatus;
   tracking_url: string;
   estimated_delivery: string | null;
   delivered_at: string | null;
   weight_kg: number | null;
+  length_cm: number | null;
+  breadth_cm: number | null;
+  height_cm: number | null;
+  /** Rate quoted for the chosen courier at booking time (audit trail). */
+  freight_charge: number | null;
+  pickup_scheduled_at: string | null;
+  pickup_token: string;
+  /** Courier shipping-label PDF; "" until generated. */
+  label_url: string;
+  /** Handover manifest PDF; "" until generated. */
+  manifest_url: string;
+  /** Last tracking refresh, by webhook or polling; null if never. */
+  last_synced_at: string | null;
   events: ShipmentEvent[];
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * One row of the Shiprocket serviceability rate card. The components are
+ * broken out so staff can see why one courier costs more, and
+ * `extra_over_cheapest` makes the trade-off explicit.
+ *
+ * Shiprocket quotes net of tax, so `rate` (freight + COD) is *not* what the
+ * booking costs — `rate_with_gst` is. Display and compare on that one;
+ * `extra_over_cheapest` is already tax-inclusive to match.
+ */
+export interface CourierRate {
+  courier_id: string;
+  courier_name: string;
+  courier: Courier;
+  /** Shiprocket's pre-tax charge: freight + COD. */
+  rate: number;
+  freight_charge: number;
+  cod_charges: number;
+  other_charges: number;
+  /** GST percentage applied on top of `rate` (SHIPROCKET_GST_RATE); 0 disables. */
+  gst_rate: number;
+  gst_amount: number;
+  /** `rate` + GST — what the Shiprocket wallet is actually debited. */
+  rate_with_gst: number;
+  /** Days in transit as reported by the courier; "" when not given. */
+  estimated_delivery_days: string;
+  /** Courier-formatted delivery date; "" when not given. */
+  etd: string;
+  /** Shiprocket performance rating, 0–5. */
+  rating: number;
+  is_surface: boolean;
+  call_before_delivery: string;
+  is_recommended: boolean;
+  extra_over_cheapest: number;
+  is_cheapest: boolean;
+  is_fastest: boolean;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Notifications                                                              */
+/* -------------------------------------------------------------------------- */
+
+export type NotificationChannel = "whatsapp" | "email";
+export type NotificationStatus = "pending" | "sent" | "failed";
+
+export type NotificationEventType =
+  | "order_placed"
+  | "payment_confirmed"
+  | "order_packed"
+  | "order_shipped"
+  | "out_for_delivery"
+  | "order_delivered"
+  | "order_cancelled"
+  | "shipment_failed"
+  | "order_returned"
+  | "refund_initiated"
+  | "password_reset";
+
+/** One delivery attempt of one transactional message on one channel. */
+export interface NotificationLog {
+  id: string;
+  channel: NotificationChannel;
+  event_type: NotificationEventType;
+  recipient_email: string;
+  recipient_phone: string;
+  order_id: string | null;
+  order_number: string;
+  status: NotificationStatus;
+  /** The provider's own error text when `status` is "failed". */
+  error: string;
+  provider_message_id: string;
+  sent_at: string | null;
+  created_at: string;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -565,7 +674,10 @@ export const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   pending: ["paid", "cancelled"],
   paid: ["processing", "cancelled"],
   processing: ["shipped", "cancelled"],
-  shipped: ["delivered"],
+  // "returned" covers a courier RTO — the parcel comes back without ever
+  // being delivered. Normally driven by the Shiprocket webhook, but staff can
+  // record it by hand when tracking is stuck.
+  shipped: ["delivered", "returned"],
   delivered: ["returned"],
   cancelled: [],
   returned: ["refunded"],
@@ -609,6 +721,7 @@ export const SHIPMENT_STATUSES: ShipmentStatus[] = [
   "delivered",
   "failed",
   "returned",
+  "cancelled",
 ];
 
 export const COURIERS: Courier[] = ["bluedart", "delhivery", "dtdc", "other"];
@@ -617,6 +730,32 @@ export const COURIER_LABEL: Record<Courier, string> = {
   delhivery: "Delhivery",
   dtdc: "DTDC",
   other: "Other",
+};
+
+/**
+ * How to name a courier on screen. The Shiprocket service name is the honest
+ * answer ("Delhivery Surface 10kg" is not the same product as "Delhivery
+ * Air"); the family enum is only a fallback for rows booked before we started
+ * recording it.
+ */
+export function courierLabel(
+  s: Pick<Shipment, "courier" | "courier_name">,
+): string {
+  return s.courier_name || COURIER_LABEL[s.courier] || "Courier";
+}
+
+export const NOTIFICATION_EVENT_LABEL: Record<NotificationEventType, string> = {
+  order_placed: "Order placed",
+  payment_confirmed: "Payment confirmed",
+  order_packed: "Order packed",
+  order_shipped: "Order shipped",
+  out_for_delivery: "Out for delivery",
+  order_delivered: "Order delivered",
+  order_cancelled: "Order cancelled",
+  shipment_failed: "Delivery attempt failed",
+  order_returned: "Returned to origin",
+  refund_initiated: "Refund initiated",
+  password_reset: "Password reset",
 };
 
 export const PO_STATUSES: PurchaseOrderStatus[] = [
@@ -629,9 +768,14 @@ export const PO_STATUSES: PurchaseOrderStatus[] = [
 
 export const STOCK_TYPES: StockType[] = ["unique", "quantity"];
 
-/** Title-case an enum value for display, e.g. "out_of_stock" → "Out Of Stock". */
-export function titleCase(value: string): string {
-  return value
+/**
+ * Title-case an enum value for display, e.g. "out_of_stock" → "Out Of Stock".
+ * Nullish/empty values render as an em dash rather than throwing — the API can
+ * legitimately return null for derived enums (e.g. Order.payment_status).
+ */
+export function titleCase(value: string | null | undefined): string {
+  if (!value) return "—";
+  return String(value)
     .split("_")
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(" ");

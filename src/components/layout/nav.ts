@@ -19,6 +19,8 @@ export interface NavItem {
   icon: LucideIcon;
   /** Permission codename required to see this item (owner sees all). */
   perm?: string;
+  /** Show the count of orders awaiting staff action alongside this item. */
+  showPendingOrders?: boolean;
   match: (pathname: string) => boolean;
 }
 
@@ -50,7 +52,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: "Sales",
     items: [
-      { href: "/orders", label: "Orders", icon: ShoppingBag, perm: "orders.view_order", match: startsWith("/orders") },
+      { href: "/orders", label: "Orders", icon: ShoppingBag, perm: "orders.view_order", showPendingOrders: true, match: startsWith("/orders") },
       // Hidden: Returns module
       // { href: "/returns", label: "Returns", icon: Undo2, perm: "orders.view_order", match: startsWith("/returns") },
       { href: "/shipments", label: "Shipments", icon: Truck, perm: "shipping.manage_shipment", match: startsWith("/shipments") },

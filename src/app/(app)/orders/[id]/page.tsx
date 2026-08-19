@@ -3,22 +3,22 @@
 import * as React from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { PackageX, User, IndianRupee, Truck } from "lucide-react";
-import {
-  createShipment,
-  getOrder,
-  initiateRefund,
-  updateOrderStatus,
-} from "@/lib/admin-api";
+import { ClipboardList, PackageX, User, IndianRupee, Truck } from "lucide-react";
+import { getOrder, initiateRefund, updateOrderStatus } from "@/lib/admin-api";
 import { orderCustomerName } from "@/lib/derive";
-import { ORDER_TRANSITIONS, titleCase, type Order, type OrderStatus } from "@/lib/types";
+import {
+  ORDER_TRANSITIONS,
+  titleCase,
+  type Order,
+  type OrderStatus,
+} from "@/lib/types";
 import { useAsync } from "@/lib/use-async";
 import { formatDateTime, formatPrice } from "@/lib/utils";
 import { useAuth } from "@/components/auth-provider";
 import { RequirePermission } from "@/components/permission-gate";
 import { PageHeader } from "@/components/layout/page-header";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
-import { NativeSelect, Field, Input } from "@/components/ui/input";
+import { NativeSelect, Field, Input, Textarea } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { OrderStatusBadge, PaymentBadge } from "@/components/ui/badge";
 import { Thumb } from "@/components/ui/thumb";
@@ -26,10 +26,16 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import { toast } from "@/components/ui/toast";
 import { OrderTimeline } from "@/components/orders/order-timeline";
+import { BookShipmentDialog } from "@/components/orders/book-shipment-dialog";
+import { OrderShipmentCard } from "@/components/orders/order-shipment-card";
+import { OrderNotificationsCard } from "@/components/orders/order-notifications-card";
 
 export default function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { data, loading, error, reload, setData } = useAsync<Order | null>(() => getOrder(id), [id]);
+  const { data, loading, error, reload, setData } = useAsync<Order | null>(
+    () => getOrder(id),
+    [id],
+  );
 
   return (
     <RequirePermission perm="orders.view_order">
@@ -46,17 +52,31 @@ export default function OrderDetailPage() {
       ) : !data ? (
         <Card><EmptyState icon={PackageX} title="Order not found" /></Card>
       ) : (
-        <OrderDetail order={data} onChange={setData} />
+        <OrderDetail order={data} onChange={setData} onReload={reload} />
       )}
     </RequirePermission>
   );
 }
 
-function OrderDetail({ order, onChange }: { order: Order; onChange: (o: Order) => void }) {
+function OrderDetail({
+  order,
+  onChange,
+  onReload,
+}: {
+  order: Order;
+  onChange: (o: Order) => void;
+  onReload: () => void;
+}) {
   const { can } = useAuth();
   const [pending, setPending] = React.useState<OrderStatus | "">("");
+  const [note, setNote] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [refundOpen, setRefundOpen] = React.useState(false);
+  const [bookOpen, setBookOpen] = React.useState(false);
+  // Bumped whenever something may have changed the shipment or the messages
+  // sent, so the two panels below refetch without a full page reload.
+  const [sideKey, setSideKey] = React.useState(0);
+  const refreshSide = React.useCallback(() => setSideKey((k) => k + 1), []);
 
   const transitions = ORDER_TRANSITIONS[order.status];
   const a = order.shipping_address;
@@ -65,25 +85,14 @@ function OrderDetail({ order, onChange }: { order: Order; onChange: (o: Order) =
     if (!pending) return;
     setBusy(true);
     try {
-      const updated = await updateOrderStatus(order.id, pending);
+      const updated = await updateOrderStatus(order.id, pending, note.trim() || undefined);
       onChange(updated);
       setPending("");
+      setNote("");
+      refreshSide();
       toast.success(`Status updated to "${titleCase(pending)}"`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not update status");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function makeShipment() {
-    setBusy(true);
-    try {
-      const s = await createShipment(order.id);
-      toast.success(`Shipment ${s.awb} booked`);
-      onChange(await getOrder(order.id).then((o) => o!));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not create shipment");
     } finally {
       setBusy(false);
     }
@@ -129,6 +138,15 @@ function OrderDetail({ order, onChange }: { order: Order; onChange: (o: Order) =
           <CardHeader><CardTitle>Timeline</CardTitle></CardHeader>
           <CardBody><OrderTimeline status={order.status} /></CardBody>
         </Card>
+
+        {order.notes && (
+          <Card>
+            <CardHeader><CardTitle>Internal notes</CardTitle></CardHeader>
+            <CardBody>
+              <p className="whitespace-pre-line text-sm text-muted">{order.notes}</p>
+            </CardBody>
+          </Card>
+        )}
       </div>
 
       <div className="space-y-6">
@@ -142,7 +160,28 @@ function OrderDetail({ order, onChange }: { order: Order; onChange: (o: Order) =
                     <option value="">Change status to…</option>
                     {transitions.map((s) => <option key={s} value={s}>{titleCase(s)}</option>)}
                   </NativeSelect>
-                  <Button className="w-full" loading={busy} disabled={!pending} onClick={applyStatus}>Apply status</Button>
+                  {pending && (
+                    <Field
+                      label="Note"
+                      htmlFor="status-note"
+                      hint="Recorded against the order and in the audit log."
+                    >
+                      <Textarea
+                        id="status-note"
+                        className="min-h-[60px]"
+                        value={note}
+                        onChange={(e) => setNote(e.target.value)}
+                        placeholder={
+                          pending === "cancelled"
+                            ? "Why is this being cancelled?"
+                            : "Optional — what changed and why"
+                        }
+                      />
+                    </Field>
+                  )}
+                  <Button className="w-full" loading={busy} disabled={!pending} onClick={applyStatus}>
+                    Apply status
+                  </Button>
                 </>
               ) : (
                 <p className="text-sm text-muted">No further transitions from “{titleCase(order.status)}”.</p>
@@ -151,14 +190,15 @@ function OrderDetail({ order, onChange }: { order: Order; onChange: (o: Order) =
               <p className="text-sm text-faint">You can view this order but not change it.</p>
             )}
 
+            <Button variant="secondary" className="w-full" asChild>
+              <Link href={`/orders/${order.id}/packing-slip`}>
+                <ClipboardList className="size-4" />Packing slip
+              </Link>
+            </Button>
+
             {order.status === "processing" && can("shipping.manage_shipment") && (
-              <Button variant="secondary" className="w-full" loading={busy} onClick={makeShipment}>
-                <Truck className="size-4" />Create shipment
-              </Button>
-            )}
-            {can("shipping.manage_shipment") && (
-              <Button variant="ghost" className="w-full" asChild>
-                <Link href="/shipments">View shipments</Link>
+              <Button variant="secondary" className="w-full" onClick={() => setBookOpen(true)}>
+                <Truck className="size-4" />Book shipment
               </Button>
             )}
             {canRefund && (
@@ -168,6 +208,12 @@ function OrderDetail({ order, onChange }: { order: Order; onChange: (o: Order) =
             )}
           </CardBody>
         </Card>
+
+        <OrderShipmentCard
+          order={order}
+          refreshKey={sideKey}
+          onOrderMayHaveChanged={onReload}
+        />
 
         <Card>
           <CardHeader>
@@ -189,13 +235,26 @@ function OrderDetail({ order, onChange }: { order: Order; onChange: (o: Order) =
             </div>
             <div className="space-y-1.5 border-t border-line pt-3">
               <SummaryRow label="Payment" value={<PaymentBadge status={order.payment_status} />} />
-              <SummaryRow label="Razorpay" value={order.razorpay_order_id} />
+              <SummaryRow label="Razorpay" value={order.razorpay_order_id || "—"} />
             </div>
           </CardBody>
         </Card>
+
+        <OrderNotificationsCard order={order} refreshKey={sideKey} />
       </div>
 
-      <RefundDialog order={order} open={refundOpen} onOpenChange={setRefundOpen} onDone={(o) => onChange(o)} />
+      <BookShipmentDialog
+        order={order}
+        open={bookOpen}
+        onOpenChange={setBookOpen}
+        onBooked={() => { refreshSide(); onReload(); }}
+      />
+      <RefundDialog
+        order={order}
+        open={refundOpen}
+        onOpenChange={setRefundOpen}
+        onDone={(o) => { onChange(o); refreshSide(); }}
+      />
     </div>
   );
 }

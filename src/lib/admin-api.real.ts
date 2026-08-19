@@ -33,7 +33,7 @@ import type { StoredSession } from "./mock-data";
 import type {
   Category,
   Collection,
-  Courier,
+  CourierRate,
   Customer,
   DashboardStats,
   Order,
@@ -44,6 +44,7 @@ import type {
   PurchaseOrder,
   Refund,
   Return,
+  NotificationLog,
   Review,
   Role,
   Shipment,
@@ -62,13 +63,18 @@ import type {
   CollectionInput,
   ConfirmCategoryImageInput,
   ConfirmMediaInput,
+  CourierRatesParams,
+  CreateShipmentInput,
+  ListNotificationsParams,
   ListOrdersParams,
   ListProductsParams,
   ListReturnsParams,
+  ListShipmentsParams,
   NameCheckResult,
   PresignInput,
   ProductWriteInput,
   PurchaseOrderCreateInput,
+  ResendNotificationInput,
   StaffCreateInput,
   SupplierInput,
 } from "./admin-api.mock";
@@ -362,6 +368,7 @@ export function listOrders(params: ListOrdersParams = {}): Promise<Page<Order>> 
     search: params.search,
     from: params.from,
     to: params.to,
+    ordering: params.ordering,
     page: params.page,
     page_size: params.page_size,
   });
@@ -459,40 +466,153 @@ export function initiateRefund(
 /* SHIPPING                                                                    */
 /* -------------------------------------------------------------------------- */
 
-export function listShipments(
-  params: { status?: Shipment["status"] } = {},
+/**
+ * DRF serialises DecimalField as a string (`COERCE_DECIMAL_TO_STRING` defaults
+ * to true), so weight, dimensions and freight arrive as "0.500" / "16.00" /
+ * "1250.00" while `Shipment` declares them as numbers. Untouched, the UI prints
+ * "0.500 kg" and "16.00×12.00×6.00 cm", and any arithmetic on them
+ * concatenates instead of adding.
+ *
+ * Normalised here at the seam rather than by flipping COERCE_DECIMAL_TO_STRING
+ * server-side: that setting is global, and money is safer as a string on the
+ * wire — this app can afford floats for display, a payments consumer parsing
+ * the same envelope may not.
+ */
+function decimalField(v: unknown): number | null {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function normalizeShipment(s: Shipment): Shipment {
+  return {
+    ...s,
+    weight_kg: decimalField(s.weight_kg),
+    length_cm: decimalField(s.length_cm),
+    breadth_cm: decimalField(s.breadth_cm),
+    height_cm: decimalField(s.height_cm),
+    freight_charge: decimalField(s.freight_charge),
+  };
+}
+
+export async function listShipments(
+  params: ListShipmentsParams = {},
 ): Promise<Shipment[]> {
-  return apiGet<Shipment[]>("/shipping/staff/shipments/", {
+  const rows = await apiGet<Shipment[]>("/shipping/staff/shipments/", {
     status: params.status,
+    order_id: params.order_id,
+    awb: params.awb,
   });
+  return rows.map(normalizeShipment);
 }
 
 export async function getShipment(id: string): Promise<Shipment | null> {
   try {
-    return await apiGet<Shipment>(`/shipping/staff/shipments/${id}/`);
+    return normalizeShipment(
+      await apiGet<Shipment>(`/shipping/staff/shipments/${id}/`),
+    );
   } catch (e) {
     return notFoundToNull(e);
   }
 }
 
-export function createShipment(
-  orderId: string,
-  courier: Courier = "delhivery",
-  weightKg = 0.5,
-): Promise<Shipment> {
-  return apiPost<Shipment>("/shipping/staff/shipments/", {
-    order_id: orderId,
-    courier,
-    weight_kg: weightKg,
+/**
+ * Live Shiprocket rate card for one order — every courier that will carry it,
+ * cheapest first, each row carrying `extra_over_cheapest` so the price
+ * difference is explicit. Call before booking.
+ */
+export function listCourierRates(
+  params: CourierRatesParams,
+): Promise<CourierRate[]> {
+  return apiGet<CourierRate[]>("/shipping/staff/couriers/", {
+    order_id: params.order_id,
+    weight_kg: params.weight_kg,
+    length_cm: params.length_cm,
+    breadth_cm: params.breadth_cm,
+    height_cm: params.height_cm,
+    cod: params.cod,
   });
 }
 
-export function syncShipment(id: string): Promise<Shipment> {
-  return apiPost<Shipment>(`/shipping/staff/shipments/${id}/sync/`);
+export async function createShipment(
+  input: CreateShipmentInput,
+): Promise<Shipment> {
+  const shipment = await apiPost<Shipment>("/shipping/staff/shipments/", {
+    order_id: input.order_id,
+    courier_id: input.courier_id,
+    courier_name: input.courier_name,
+    courier: input.courier,
+    freight_charge: input.freight_charge ?? undefined,
+    weight_kg: input.weight_kg,
+    length_cm: input.length_cm,
+    breadth_cm: input.breadth_cm,
+    height_cm: input.height_cm,
+    cod: input.cod ?? false,
+  });
+  return normalizeShipment(shipment);
 }
 
-export function cancelShipment(id: string): Promise<Shipment> {
-  return apiPost<Shipment>(`/shipping/staff/shipments/${id}/cancel/`);
+/** Retry AWB assignment; never re-book — that duplicates the consignment. */
+export async function assignAwb(id: string): Promise<Shipment> {
+  return normalizeShipment(
+    await apiPost<Shipment>(`/shipping/staff/shipments/${id}/assign-awb/`),
+  );
+}
+
+export async function schedulePickup(id: string): Promise<Shipment> {
+  return normalizeShipment(
+    await apiPost<Shipment>(`/shipping/staff/shipments/${id}/pickup/`),
+  );
+}
+
+export async function generateLabel(id: string): Promise<Shipment> {
+  return normalizeShipment(
+    await apiPost<Shipment>(`/shipping/staff/shipments/${id}/label/`),
+  );
+}
+
+export async function generateManifest(id: string): Promise<Shipment> {
+  return normalizeShipment(
+    await apiPost<Shipment>(`/shipping/staff/shipments/${id}/manifest/`),
+  );
+}
+
+export async function syncShipment(id: string): Promise<Shipment> {
+  return normalizeShipment(
+    await apiPost<Shipment>(`/shipping/staff/shipments/${id}/sync/`),
+  );
+}
+
+export async function cancelShipment(id: string): Promise<Shipment> {
+  return normalizeShipment(
+    await apiPost<Shipment>(`/shipping/staff/shipments/${id}/cancel/`),
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* NOTIFICATIONS                                                               */
+/* -------------------------------------------------------------------------- */
+
+export function listNotifications(
+  params: ListNotificationsParams = {},
+): Promise<Page<NotificationLog>> {
+  return apiGetList<NotificationLog>("/notifications/staff/", {
+    order_id: params.order_id,
+    channel: params.channel,
+    status: params.status,
+    page: params.page,
+    page_size: params.page_size,
+  });
+}
+
+export function resendNotification(
+  input: ResendNotificationInput,
+): Promise<NotificationLog[]> {
+  return apiPost<NotificationLog[]>("/notifications/staff/resend/", {
+    order_id: input.order_id,
+    event_type: input.event_type,
+    channel: input.channel,
+  });
 }
 
 /* -------------------------------------------------------------------------- */

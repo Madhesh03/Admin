@@ -41,7 +41,13 @@ export type {
   SupplierInput,
   PurchaseOrderCreateInput,
   ListOrdersParams,
+  OrderOrdering,
   ListReturnsParams,
+  ListShipmentsParams,
+  CourierRatesParams,
+  CreateShipmentInput,
+  ListNotificationsParams,
+  ResendNotificationInput,
   StaffCreateInput,
 } from "./admin-api.mock";
 
@@ -134,9 +140,19 @@ export const initiateRefund = USE_MOCKS ? mock.initiateRefund : real.initiateRef
 /* Shipping */
 export const listShipments = USE_MOCKS ? mock.listShipments : real.listShipments;
 export const getShipment = USE_MOCKS ? mock.getShipment : real.getShipment;
+/** Rate card — call before booking so the courier choice is priced. */
+export const listCourierRates = USE_MOCKS ? mock.listCourierRates : real.listCourierRates;
 export const createShipment = USE_MOCKS ? mock.createShipment : real.createShipment;
+export const assignAwb = USE_MOCKS ? mock.assignAwb : real.assignAwb;
+export const schedulePickup = USE_MOCKS ? mock.schedulePickup : real.schedulePickup;
+export const generateLabel = USE_MOCKS ? mock.generateLabel : real.generateLabel;
+export const generateManifest = USE_MOCKS ? mock.generateManifest : real.generateManifest;
 export const syncShipment = USE_MOCKS ? mock.syncShipment : real.syncShipment;
 export const cancelShipment = USE_MOCKS ? mock.cancelShipment : real.cancelShipment;
+
+/* Notifications — what the customer was told, and whether it landed */
+export const listNotifications = USE_MOCKS ? mock.listNotifications : real.listNotifications;
+export const resendNotification = USE_MOCKS ? mock.resendNotification : real.resendNotification;
 
 /* Staff & roles */
 export const listRoles = USE_MOCKS ? mock.listRoles : real.listRoles;

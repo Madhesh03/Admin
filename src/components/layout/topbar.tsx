@@ -5,6 +5,7 @@ import Link from "next/link";
 import { LogOut, Menu, Building2 } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
 import { ALL_NAV_ITEMS, NAV_GROUPS } from "./nav";
+import { PendingOrdersBadge } from "./pending-orders-badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -51,6 +52,7 @@ export function Topbar() {
                   <Link href={item.href}>
                     <item.icon />
                     {item.label}
+                    {item.showPendingOrders && <PendingOrdersBadge />}
                   </Link>
                 </DropdownMenuItem>
               ))}

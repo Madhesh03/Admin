@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Gem } from "lucide-react";
 import { NAV_GROUPS } from "./nav";
+import { PendingOrdersBadge } from "./pending-orders-badge";
 import { ResetDemoButton } from "./reset-demo-button";
 import { useAuth } from "@/components/auth-provider";
 import { cn } from "@/lib/utils";
@@ -52,6 +53,7 @@ export function Sidebar() {
                     >
                       <Icon className="size-[18px]" />
                       {item.label}
+                      {item.showPendingOrders && <PendingOrdersBadge />}
                     </Link>
                   );
                 })}

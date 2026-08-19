@@ -3,11 +3,29 @@
 import * as React from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { PackageX, RefreshCw, Ban } from "lucide-react";
-import { cancelShipment, getShipment, syncShipment } from "@/lib/admin-api";
-import { COURIER_LABEL, type Shipment } from "@/lib/types";
+import {
+  Ban,
+  ExternalLink,
+  FileText,
+  PackageX,
+  RefreshCw,
+  ScrollText,
+  Tag,
+  TriangleAlert,
+  Truck,
+} from "lucide-react";
+import {
+  assignAwb,
+  cancelShipment,
+  generateLabel,
+  generateManifest,
+  getShipment,
+  schedulePickup,
+  syncShipment,
+} from "@/lib/admin-api";
+import { courierLabel, type Shipment } from "@/lib/types";
 import { useAsync } from "@/lib/use-async";
-import { formatDate, formatDateTime } from "@/lib/utils";
+import { formatDate, formatDateTime, formatPrice } from "@/lib/utils";
 import { useAuth } from "@/components/auth-provider";
 import { RequirePermission } from "@/components/permission-gate";
 import { PageHeader } from "@/components/layout/page-header";
@@ -25,7 +43,7 @@ export default function ShipmentDetailPage() {
     <RequirePermission perm="shipping.manage_shipment">
       <PageHeader
         title={data ? `Shipment · ${data.order_number}` : "Shipment"}
-        description={data?.awb}
+        description={data?.awb || undefined}
         backHref="/shipments"
         actions={data ? <ShipmentStatusBadge status={data.status} /> : undefined}
       />
@@ -54,14 +72,50 @@ function Detail({ shipment, onChange }: { shipment: Shipment; onChange: (s: Ship
     finally { setBusy(false); }
   }
 
-  const canCancel = !["in_transit", "out_for_delivery", "delivered", "failed", "returned"].includes(shipment.status);
-  const canSync = !["delivered", "failed", "returned"].includes(shipment.status);
+  const settled = ["delivered", "failed", "returned", "cancelled"];
+  const canCancel = shipment.status === "pending" || shipment.status === "booked";
+  const canSync = !settled.includes(shipment.status) && !!shipment.awb;
+  const canPickup =
+    !!shipment.awb && (shipment.status === "pending" || shipment.status === "booked");
+  const canDocs = !!shipment.awb;
 
   return (
     <div className="grid gap-6 lg:grid-cols-3">
       <div className="space-y-6 lg:col-span-2">
+        {!shipment.awb && (
+          <Card>
+            <CardBody className="flex gap-3 bg-amber-50">
+              <TriangleAlert className="size-5 shrink-0 text-amber-700" />
+              <div className="space-y-2">
+                <p className="text-sm font-semibold text-amber-900">No waybill assigned</p>
+                <p className="text-sm text-amber-800">
+                  The Shiprocket order exists but the courier issued no AWB, so
+                  this parcel cannot move. Retry the assignment — booking again
+                  would create a second consignment for the same order.
+                </p>
+                {manage && (
+                  <Button
+                    size="sm"
+                    loading={busy}
+                    onClick={() => run(() => assignAwb(shipment.id), "AWB assigned")}
+                  >
+                    <Tag className="size-4" />Retry AWB assignment
+                  </Button>
+                )}
+              </div>
+            </CardBody>
+          </Card>
+        )}
+
         <Card>
-          <CardHeader><CardTitle>Tracking events</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle>Tracking events</CardTitle>
+            <span className="text-xs text-faint">
+              {shipment.last_synced_at
+                ? `Synced ${formatDateTime(shipment.last_synced_at)}`
+                : "Never synced"}
+            </span>
+          </CardHeader>
           <CardBody>
             {shipment.events.length === 0 ? (
               <p className="text-sm text-faint">No events yet.</p>
@@ -91,22 +145,130 @@ function Detail({ shipment, onChange }: { shipment: Shipment; onChange: (s: Ship
           <CardHeader><CardTitle>Details</CardTitle></CardHeader>
           <CardBody className="space-y-1.5 text-sm">
             <Row label="Order"><Link href={`/orders/${shipment.order_id}`} className="font-semibold text-forest hover:underline">{shipment.order_number}</Link></Row>
-            <Row label="Courier"><span className="text-ink">{COURIER_LABEL[shipment.courier]}</span></Row>
-            <Row label="AWB"><span className="text-ink">{shipment.awb}</span></Row>
-            <Row label="Tracking"><a href={shipment.tracking_url} target="_blank" rel="noreferrer" className="text-forest hover:underline">Open</a></Row>
+            <Row label="Courier"><span className="text-ink">{courierLabel(shipment)}</span></Row>
+            <Row label="AWB"><span className="text-ink">{shipment.awb || "—"}</span></Row>
+            <Row label="Freight">
+              <span className="text-ink">
+                {shipment.freight_charge != null ? formatPrice(shipment.freight_charge) : "—"}
+              </span>
+            </Row>
+            <Row label="Tracking">
+              {shipment.tracking_url ? (
+                <a href={shipment.tracking_url} target="_blank" rel="noreferrer" className="text-forest hover:underline">Open</a>
+              ) : (
+                <span className="text-faint">—</span>
+              )}
+            </Row>
             <Row label="Est. delivery"><span className="text-ink">{formatDate(shipment.estimated_delivery)}</span></Row>
             <Row label="Delivered"><span className="text-ink">{shipment.delivered_at ? formatDateTime(shipment.delivered_at) : "—"}</span></Row>
             <Row label="Weight"><span className="text-ink">{shipment.weight_kg != null ? `${shipment.weight_kg} kg` : "—"}</span></Row>
+            <Row label="Dimensions">
+              <span className="text-ink">
+                {shipment.length_cm != null
+                  ? `${shipment.length_cm}×${shipment.breadth_cm}×${shipment.height_cm} cm`
+                  : "—"}
+              </span>
+            </Row>
+            <Row label="Pickup">
+              <span className="text-ink">
+                {shipment.pickup_scheduled_at
+                  ? `${formatDateTime(shipment.pickup_scheduled_at)}${shipment.pickup_token ? ` · ${shipment.pickup_token}` : ""}`
+                  : "Not scheduled"}
+              </span>
+            </Row>
           </CardBody>
         </Card>
+
+        {(shipment.label_url || shipment.manifest_url) && (
+          <Card>
+            <CardHeader><CardTitle>Documents</CardTitle></CardHeader>
+            <CardBody className="space-y-2">
+              {shipment.label_url && (
+                <Button variant="secondary" className="w-full" asChild>
+                  <a href={shipment.label_url} target="_blank" rel="noreferrer">
+                    <FileText className="size-4" />Shipping label
+                    <ExternalLink className="size-3.5" />
+                  </a>
+                </Button>
+              )}
+              {shipment.manifest_url && (
+                <Button variant="secondary" className="w-full" asChild>
+                  <a href={shipment.manifest_url} target="_blank" rel="noreferrer">
+                    <ScrollText className="size-4" />Manifest
+                    <ExternalLink className="size-3.5" />
+                  </a>
+                </Button>
+              )}
+            </CardBody>
+          </Card>
+        )}
 
         {manage && (
           <Card>
             <CardHeader><CardTitle>Actions</CardTitle></CardHeader>
             <CardBody className="space-y-2">
-              {canSync && <Button variant="secondary" className="w-full" loading={busy} onClick={() => run(() => syncShipment(shipment.id), "Tracking synced")}><RefreshCw className="size-4" />Sync tracking</Button>}
-              {canCancel && <Button variant="danger" className="w-full" loading={busy} onClick={() => run(() => cancelShipment(shipment.id), "Shipment cancelled")}><Ban className="size-4" />Cancel shipment</Button>}
-              {!canSync && !canCancel && <p className="text-sm text-faint">No actions available in this state.</p>}
+              {canPickup && (
+                <Button
+                  variant={shipment.pickup_scheduled_at ? "secondary" : "primary"}
+                  className="w-full"
+                  loading={busy}
+                  onClick={() => run(() => schedulePickup(shipment.id), "Pickup requested")}
+                >
+                  <Truck className="size-4" />
+                  {shipment.pickup_scheduled_at ? "Re-request pickup" : "Schedule pickup"}
+                </Button>
+              )}
+              {canDocs && (
+                <Button
+                  variant="secondary"
+                  className="w-full"
+                  loading={busy}
+                  onClick={() => run(() => generateLabel(shipment.id), "Label generated")}
+                >
+                  <FileText className="size-4" />
+                  {shipment.label_url ? "Regenerate label" : "Generate label"}
+                </Button>
+              )}
+              {canDocs && (
+                <Button
+                  variant="secondary"
+                  className="w-full"
+                  loading={busy}
+                  onClick={() => run(() => generateManifest(shipment.id), "Manifest generated")}
+                >
+                  <ScrollText className="size-4" />
+                  {shipment.manifest_url ? "Regenerate manifest" : "Generate manifest"}
+                </Button>
+              )}
+              {canSync && (
+                <Button
+                  variant="secondary"
+                  className="w-full"
+                  loading={busy}
+                  onClick={() => run(() => syncShipment(shipment.id), "Tracking synced")}
+                >
+                  <RefreshCw className="size-4" />Sync tracking
+                </Button>
+              )}
+              {canCancel && (
+                <Button
+                  variant="danger"
+                  className="w-full"
+                  loading={busy}
+                  onClick={() => run(() => cancelShipment(shipment.id), "Shipment cancelled")}
+                >
+                  <Ban className="size-4" />Cancel shipment
+                </Button>
+              )}
+              {!canPickup && !canDocs && !canSync && !canCancel && (
+                <p className="text-sm text-faint">No actions available in this state.</p>
+              )}
+              {shipment.status === "cancelled" && (
+                <p className="text-xs text-faint">
+                  Cancelled — the order can be booked again with another courier
+                  from its own page.
+                </p>
+              )}
             </CardBody>
           </Card>
         )}

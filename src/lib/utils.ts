@@ -17,7 +17,7 @@ export function cn(...inputs: ClassValue[]) {
 export const formatPrice = (v: number | string | null | undefined) => {
   const n = typeof v === "number" ? v : Number(v);
   if (!Number.isFinite(n)) return "—";
-  return `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+  return `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
 /** Human date, e.g. "3 Jul 2026". Accepts ISO string. */

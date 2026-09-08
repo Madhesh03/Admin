@@ -518,7 +518,7 @@ export function ProductForm({
       </div>
 
       {/* Sidebar */}
-      <div className="space-y-6">
+      <div className="space-y-6 lg:sticky lg:top-6 lg:self-start">
         <Card>
           <CardHeader><CardTitle>Preview</CardTitle></CardHeader>
           <CardBody className="space-y-3 text-sm">

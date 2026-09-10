@@ -11,8 +11,11 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Card } from "@/components/ui/card";
 import { NativeSelect } from "@/components/ui/input";
 import { ReturnStatusBadge } from "@/components/ui/badge";
+import { Pagination } from "@/components/ui/pagination";
 import { EmptyState, ErrorState, TableSkeleton } from "@/components/ui/states";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
+
+const PAGE_SIZE = 20;
 
 export default function ReturnsPage() {
   return (
@@ -25,11 +28,18 @@ export default function ReturnsPage() {
 function Inner() {
   const router = useRouter();
   const [status, setStatus] = React.useState<ReturnStatus | "all">("all");
+  const [page, setPage] = React.useState(1);
+
+  React.useEffect(() => {
+    setPage(1);
+  }, [status]);
+
   const { data, loading, error, reload } = useAsync(
-    () => listReturns(status === "all" ? {} : { status }),
-    [status],
+    () => listReturns({ ...(status === "all" ? {} : { status }), page, page_size: PAGE_SIZE }),
+    [status, page],
   );
   const rows: Return[] = data?.items ?? [];
+  const total = data?.meta.total ?? 0;
 
   return (
     <div>
@@ -48,6 +58,7 @@ function Inner() {
         ) : rows.length === 0 ? (
           <EmptyState title="No returns" />
         ) : (
+          <>
           <Table>
             <THead><tr><Th>Order</Th><Th>Reason</Th><Th>Requested</Th><Th>Status</Th></tr></THead>
             <TBody>
@@ -61,6 +72,8 @@ function Inner() {
               ))}
             </TBody>
           </Table>
+          <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />
+          </>
         )}
       </Card>
     </div>

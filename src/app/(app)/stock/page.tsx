@@ -13,7 +13,7 @@ import {
 import { stockLevel } from "@/lib/derive";
 import { adjustStockSchema } from "@/lib/schemas";
 import { METAL_LABEL, titleCase, type ProductList, type StockLedgerEntry } from "@/lib/types";
-import { useAsync, useDebouncedValue } from "@/lib/use-async";
+import { useAsync, useDebouncedValue, usePagination } from "@/lib/use-async";
 import { cn, formatDateTime, formatPrice, preferStableSrc } from "@/lib/utils";
 import { useAuth } from "@/components/auth-provider";
 import { RequirePermission } from "@/components/permission-gate";
@@ -22,6 +22,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { StockBadge } from "@/components/ui/badge";
+import { Pagination } from "@/components/ui/pagination";
 import { Thumb } from "@/components/ui/thumb";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { EmptyState, ErrorState, LoadingState, TableSkeleton } from "@/components/ui/states";
@@ -30,6 +31,7 @@ import { toast } from "@/components/ui/toast";
 
 type Tab = "levels" | "low" | "valuation";
 const STOCK_TEXT = { out: "text-red-600", low: "text-amber-600", healthy: "text-ink" } as const;
+const STOCK_PAGE_SIZE = 20;
 
 export default function StockPage() {
   return (
@@ -100,12 +102,17 @@ function LevelsTab({
   refreshKey: number;
 }) {
   const [q, setQ] = React.useState("");
+  const [page, setPage] = React.useState(1);
   const debounced = useDebouncedValue(q);
+  React.useEffect(() => {
+    setPage(1);
+  }, [debounced]);
   const { data, loading, error, reload } = useAsync(
-    () => listProducts({ q: debounced, ordering: "name", page_size: 100 }),
-    [debounced, refreshKey],
+    () => listProducts({ q: debounced, ordering: "name", page, page_size: STOCK_PAGE_SIZE }),
+    [debounced, refreshKey, page],
   );
   const rows = data?.items ?? [];
+  const total = data?.meta.total ?? 0;
 
   return (
     <>
@@ -123,6 +130,7 @@ function LevelsTab({
         ) : rows.length === 0 ? (
           <EmptyState title="No products" />
         ) : (
+          <>
           <Table>
             <THead>
               <tr>
@@ -156,6 +164,8 @@ function LevelsTab({
               ))}
             </TBody>
           </Table>
+          <Pagination page={page} pageSize={STOCK_PAGE_SIZE} total={total} onPageChange={setPage} />
+          </>
         )}
       </Card>
     </>
@@ -165,6 +175,10 @@ function LevelsTab({
 function LowTab({ onAdjust, refreshKey }: { onAdjust?: (p: ProductList) => void; refreshKey: number }) {
   const [threshold, setThreshold] = React.useState(5);
   const { data, loading, error, reload } = useAsync(() => listLowStock(threshold), [threshold, refreshKey]);
+  const { page, setPage, pageRows, total } = usePagination(data?.items ?? [], 20);
+  React.useEffect(() => {
+    setPage(1);
+  }, [threshold, setPage]);
 
   return (
     <>
@@ -181,10 +195,11 @@ function LowTab({ onAdjust, refreshKey }: { onAdjust?: (p: ProductList) => void;
         ) : !data || data.items.length === 0 ? (
           <EmptyState title="All healthy" description="No products at or below this threshold." />
         ) : (
+          <>
           <Table>
             <THead><tr><Th className="w-[50%]">Product</Th><Th>Availability</Th><Th className="text-right">Qty</Th>{onAdjust && <Th />}</tr></THead>
             <TBody>
-              {data.items.map((p) => (
+              {pageRows.map((p) => (
                 <Tr key={p.id}>
                   <Td>
                     <Link href={`/products/${p.id}`} className="font-semibold text-ink hover:text-forest">{p.name}</Link>
@@ -197,6 +212,8 @@ function LowTab({ onAdjust, refreshKey }: { onAdjust?: (p: ProductList) => void;
               ))}
             </TBody>
           </Table>
+          <Pagination page={page} pageSize={20} total={total} onPageChange={setPage} />
+          </>
         )}
       </Card>
     </>
@@ -205,6 +222,7 @@ function LowTab({ onAdjust, refreshKey }: { onAdjust?: (p: ProductList) => void;
 
 function ValuationTab({ refreshKey }: { refreshKey: number }) {
   const { data, loading, error, reload } = useAsync(() => stockValuation(), [refreshKey]);
+  const { page, setPage, pageRows, total } = usePagination(data?.rows ?? [], 20);
   return (
     <Card>
       {loading ? (
@@ -220,7 +238,7 @@ function ValuationTab({ refreshKey }: { refreshKey: number }) {
           <Table>
             <THead><tr><Th>SKU</Th><Th>Product</Th><Th>Metal</Th><Th className="text-right">Qty</Th><Th className="text-right">Last unit cost</Th><Th className="text-right">Value</Th></tr></THead>
             <TBody>
-              {data.rows.map((r) => (
+              {pageRows.map((r) => (
                 <Tr key={r.id}>
                   <Td className="text-faint">{r.sku}</Td>
                   <Td className="font-medium text-ink">{r.name}</Td>
@@ -232,6 +250,7 @@ function ValuationTab({ refreshKey }: { refreshKey: number }) {
               ))}
             </TBody>
           </Table>
+          <Pagination page={page} pageSize={20} total={total} onPageChange={setPage} />
         </>
       )}
     </Card>

@@ -2,27 +2,20 @@
 
 import * as React from "react";
 import { Plus, Pencil } from "lucide-react";
-import {
-  createSupplier,
-  listSuppliers,
-  updateSupplier,
-  type SupplierInput,
-} from "@/lib/admin-api";
-import { supplierSchema } from "@/lib/schemas";
+import { listSuppliers } from "@/lib/admin-api";
 import type { Supplier } from "@/lib/types";
-import { useAsync } from "@/lib/use-async";
+import { useAsync, usePagination } from "@/lib/use-async";
 import { useAuth } from "@/components/auth-provider";
 import { RequirePermission } from "@/components/permission-gate";
 import { PageHeader } from "@/components/layout/page-header";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Field, Input, NativeSelect, Textarea } from "@/components/ui/input";
-import { ToggleField } from "@/components/ui/switch";
+import { NativeSelect } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Pagination } from "@/components/ui/pagination";
 import { EmptyState, ErrorState, TableSkeleton } from "@/components/ui/states";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
-import { toast } from "@/components/ui/toast";
+import { SupplierDialog } from "@/components/suppliers/supplier-dialog";
 
 export default function SuppliersPage() {
   return (
@@ -40,6 +33,10 @@ function SuppliersInner() {
     [active],
   );
   const [editing, setEditing] = React.useState<Supplier | "new" | null>(null);
+  const { page, setPage, pageRows, total } = usePagination(data ?? [], 20);
+  React.useEffect(() => {
+    setPage(1);
+  }, [active, setPage]);
 
   return (
     <div>
@@ -63,10 +60,11 @@ function SuppliersInner() {
         ) : !data || data.length === 0 ? (
           <EmptyState title="No suppliers" />
         ) : (
+          <>
           <Table>
             <THead><tr><Th>Supplier</Th><Th>Contact</Th><Th>GSTIN</Th><Th>Status</Th>{can("inventory.manage_supplier") && <Th />}</tr></THead>
             <TBody>
-              {data.map((s) => (
+              {pageRows.map((s) => (
                 <Tr key={s.id}>
                   <Td>
                     <p className="font-semibold text-ink">{s.name}</p>
@@ -83,6 +81,8 @@ function SuppliersInner() {
               ))}
             </TBody>
           </Table>
+          <Pagination page={page} pageSize={20} total={total} onPageChange={setPage} />
+          </>
         )}
       </Card>
 
@@ -94,58 +94,5 @@ function SuppliersInner() {
         />
       )}
     </div>
-  );
-}
-
-function SupplierDialog({ supplier, onClose, onSaved }: { supplier: Supplier | null; onClose: () => void; onSaved: () => void }) {
-  const [form, setForm] = React.useState<SupplierInput>({
-    name: supplier?.name ?? "", contact_name: supplier?.contact_name ?? "", phone: supplier?.phone ?? "",
-    email: supplier?.email ?? "", address: supplier?.address ?? "", gstin: supplier?.gstin ?? "",
-    notes: supplier?.notes ?? "", is_active: supplier?.is_active ?? true,
-  });
-  const [errors, setErrors] = React.useState<Record<string, string>>({});
-  const [busy, setBusy] = React.useState(false);
-
-  async function submit() {
-    const parsed = supplierSchema.safeParse(form);
-    if (!parsed.success) {
-      const fe = parsed.error.flatten().fieldErrors;
-      setErrors({ name: fe.name?.[0] ?? "", email: fe.email?.[0] ?? "", gstin: fe.gstin?.[0] ?? "" });
-      return;
-    }
-    setBusy(true);
-    try {
-      if (supplier) await updateSupplier(supplier.id, parsed.data);
-      else await createSupplier(parsed.data);
-      toast.success(supplier ? "Supplier updated" : "Supplier created");
-      onSaved();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not save");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent title={supplier ? "Edit supplier" : "New supplier"}>
-        <div className="space-y-4">
-          <Field label="Name" required error={errors.name}><Input value={form.name} invalid={!!errors.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Contact name"><Input value={form.contact_name} onChange={(e) => setForm({ ...form, contact_name: e.target.value })} /></Field>
-            <Field label="Phone"><Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></Field>
-            <Field label="Email" error={errors.email}><Input value={form.email} invalid={!!errors.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
-            <Field label="GSTIN" error={errors.gstin}><Input value={form.gstin} invalid={!!errors.gstin} onChange={(e) => setForm({ ...form, gstin: e.target.value })} /></Field>
-          </div>
-          <Field label="Address"><Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></Field>
-          <Field label="Notes"><Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></Field>
-          <ToggleField label="Active" checked={form.is_active ?? true} onCheckedChange={(v) => setForm({ ...form, is_active: v })} />
-          <div className="flex justify-end gap-2">
-            <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
-            <Button size="sm" loading={busy} onClick={submit}>{supplier ? "Save" : "Create"}</Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
   );
 }

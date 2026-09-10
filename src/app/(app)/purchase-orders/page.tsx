@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { listPurchaseOrders } from "@/lib/admin-api";
 import { PO_STATUSES, titleCase, type PurchaseOrder, type PurchaseOrderStatus } from "@/lib/types";
-import { useAsync } from "@/lib/use-async";
+import { useAsync, usePagination } from "@/lib/use-async";
 import { formatDate, formatPrice } from "@/lib/utils";
 import { useAuth } from "@/components/auth-provider";
 import { RequirePermission } from "@/components/permission-gate";
@@ -15,6 +15,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/input";
 import { PoStatusBadge } from "@/components/ui/badge";
+import { Pagination } from "@/components/ui/pagination";
 import { EmptyState, ErrorState, TableSkeleton } from "@/components/ui/states";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 
@@ -34,6 +35,10 @@ function Inner() {
     () => listPurchaseOrders(status === "all" ? {} : { status }),
     [status],
   );
+  const { page, setPage, pageRows, total } = usePagination(data ?? [], 20);
+  React.useEffect(() => {
+    setPage(1);
+  }, [status, setPage]);
 
   return (
     <div>
@@ -56,10 +61,11 @@ function Inner() {
         ) : !data || data.length === 0 ? (
           <EmptyState title="No purchase orders" />
         ) : (
+          <>
           <Table>
             <THead><tr><Th>PO #</Th><Th>Supplier</Th><Th>Status</Th><Th>Expected</Th><Th className="text-right">Total</Th></tr></THead>
             <TBody>
-              {data.map((po) => (
+              {pageRows.map((po) => (
                 <Tr key={po.id} clickable onClick={() => router.push(`/purchase-orders/${po.id}`)}>
                   <Td className="font-semibold text-ink">{po.po_number}</Td>
                   <Td className="text-muted">{po.supplier_name}</Td>
@@ -70,6 +76,8 @@ function Inner() {
               ))}
             </TBody>
           </Table>
+          <Pagination page={page} pageSize={20} total={total} onPageChange={setPage} />
+          </>
         )}
       </Card>
     </div>

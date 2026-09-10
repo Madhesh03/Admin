@@ -30,6 +30,7 @@ import { Card } from "@/components/ui/card";
 import { Input, NativeSelect } from "@/components/ui/input";
 import { Thumb } from "@/components/ui/thumb";
 import { ProductStatusBadge } from "@/components/ui/badge";
+import { Pagination } from "@/components/ui/pagination";
 import { EmptyState, ErrorState, TableSkeleton } from "@/components/ui/states";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 import {
@@ -44,6 +45,7 @@ import { toast } from "@/components/ui/toast";
 import { BulkEditProductsDialog } from "@/components/products/bulk-edit-products";
 
 const STOCK_TEXT = { out: "text-red-600", low: "text-amber-600", healthy: "text-ink" } as const;
+const PAGE_SIZE = 20;
 
 export default function ProductsPage() {
   return (
@@ -61,13 +63,20 @@ function ProductsInner() {
   const [metal, setMetal] = React.useState<ListProductsParams["metal_type"]>("all");
   const [status, setStatus] = React.useState<ListProductsParams["status"]>("all");
   const [ordering, setOrdering] = React.useState("-created_at");
+  const [page, setPage] = React.useState(1);
   const debounced = useDebouncedValue(q);
+
+  // Any change to what's being asked for invalidates the current page number —
+  // page 3 of the old result set is meaningless against the new one.
+  React.useEffect(() => {
+    setPage(1);
+  }, [debounced, category, metal, status, ordering]);
 
   const cats = useAsync<Category[]>(() => listCategories(), []);
   const cols = useAsync<Collection[]>(() => listCollections(), []);
   const { data, loading, error, reload } = useAsync(
-    () => listProducts({ q: debounced, category, metal_type: metal, status, ordering }),
-    [debounced, category, metal, status, ordering],
+    () => listProducts({ q: debounced, category, metal_type: metal, status, ordering, page, page_size: PAGE_SIZE }),
+    [debounced, category, metal, status, ordering, page],
   );
 
   const [toArchive, setToArchive] = React.useState<ProductList | null>(null);
@@ -107,6 +116,7 @@ function ProductsInner() {
   }
 
   const rows = data?.items ?? [];
+  const total = data?.meta.total ?? 0;
 
   // Selection scoped to what's currently visible.
   const selectedIds = rows.filter((p) => selected.has(p.id)).map((p) => p.id);
@@ -195,6 +205,7 @@ function ProductsInner() {
         ) : rows.length === 0 ? (
           <EmptyState title="No products found" description="Try clearing filters, or add your first product." />
         ) : (
+          <>
           <Table>
             <THead>
               <tr>
@@ -298,6 +309,8 @@ function ProductsInner() {
               })}
             </TBody>
           </Table>
+          <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />
+          </>
         )}
       </Card>
 

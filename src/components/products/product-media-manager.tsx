@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Upload, Link2, Trash2, Star, ImagePlus, ZoomIn, RotateCcw } from "lucide-react";
+import { Upload, Link2, Trash2, Star, Eye, ImagePlus, ZoomIn, RotateCcw } from "lucide-react";
 import { deleteMedia } from "@/lib/admin-api";
 import { uploadProductImage, uploadProductImageFromUrl } from "@/lib/media-upload";
 import type { ProductMedia } from "@/lib/types";
@@ -15,9 +15,12 @@ import { cn, mediaUrl, preferStableSrc } from "@/lib/utils";
 /**
  * Media manager using the real S3 direct-upload flow (presign → PUT → confirm),
  * plus delete. Images can be dragged in, browsed, or pasted as a URL, previewed
- * with zoom, and one marked primary. Post-upload reorder/set-primary has no API
- * endpoint yet, so primary is chosen at upload time and deletes auto-promote the
- * next image. The upload plumbing lives in `@/lib/media-upload`.
+ * with zoom, and one marked primary and/or a (different) one marked hover — the
+ * image swapped in when a shopper hovers the product card on the storefront.
+ * Post-upload reorder/set-primary/set-hover has no API endpoint yet, so both
+ * are chosen at upload time and deletes auto-promote the next image (primary
+ * only — hover has no forced replacement, a product can have none). The upload
+ * plumbing lives in `@/lib/media-upload`.
  */
 export function ProductMediaManager({
   productId,
@@ -44,8 +47,20 @@ export function ProductMediaManager({
   const [busy, setBusy] = React.useState(false);
   const [dragging, setDragging] = React.useState(false);
   const [primaryNext, setPrimaryNext] = React.useState(media.length === 0);
+  // A single image can't be both (the backend rejects it — a hover "swap" to
+  // itself is a no-op) so checking one clears the other.
+  const [hoverNext, setHoverNext] = React.useState(false);
   const [zoom, setZoom] = React.useState<number | null>(null);
   const fileRef = React.useRef<HTMLInputElement>(null);
+
+  function togglePrimaryNext(v: boolean) {
+    setPrimaryNext(v);
+    if (v) setHoverNext(false);
+  }
+  function toggleHoverNext(v: boolean) {
+    setHoverNext(v);
+    if (v) setPrimaryNext(false);
+  }
 
   async function handleFiles(files: FileList | null) {
     const images = Array.from(files ?? []).filter((f) => f.type.startsWith("image/"));
@@ -53,6 +68,7 @@ export function ProductMediaManager({
     setBusy(true);
     try {
       let makePrimary = primaryNext;
+      let makeHover = hoverNext;
       for (const file of images) {
         await uploadProductImage({
           productId,
@@ -60,10 +76,14 @@ export function ProductMediaManager({
           fileName: file.name,
           mime: file.type || "application/octet-stream",
           isPrimary: makePrimary,
+          isHover: makeHover,
         });
-        makePrimary = false; // only the first can claim primary
+        // only the first upload in a batch can claim primary/hover
+        makePrimary = false;
+        makeHover = false;
       }
       setPrimaryNext(false);
+      setHoverNext(false);
       toast.success(`Added ${images.length} image${images.length > 1 ? "s" : ""}`);
       onChanged();
     } catch (err) {
@@ -79,8 +99,9 @@ export function ProductMediaManager({
     if (!trimmed) return;
     setBusy(true);
     try {
-      await uploadProductImageFromUrl({ productId, url: trimmed, isPrimary: primaryNext });
+      await uploadProductImageFromUrl({ productId, url: trimmed, isPrimary: primaryNext, isHover: hoverNext });
       setPrimaryNext(false);
+      setHoverNext(false);
       setUrl("");
       toast.success("Image added");
       onChanged();
@@ -115,7 +136,7 @@ export function ProductMediaManager({
               key={m.id}
               className={cn(
                 "group relative aspect-square overflow-hidden rounded-lg border",
-                m.is_primary ? "border-forest ring-1 ring-forest/30" : "border-line",
+                m.is_primary ? "border-forest ring-1 ring-forest/30" : m.is_hover ? "border-amber-500 ring-1 ring-amber-500/30" : "border-line",
                 marked && "opacity-40 ring-1 ring-red-500",
               )}
             >
@@ -124,10 +145,19 @@ export function ProductMediaManager({
                 <span className="absolute left-1.5 top-1.5 inline-flex items-center gap-0.5 rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
                   Will be removed
                 </span>
-              ) : m.is_primary && (
-                <span className="absolute left-1.5 top-1.5 inline-flex items-center gap-0.5 rounded bg-forest px-1.5 py-0.5 text-[10px] font-bold text-white">
-                  <Star className="size-2.5" />Primary
-                </span>
+              ) : (
+                <>
+                  {m.is_primary && (
+                    <span className="absolute left-1.5 top-1.5 inline-flex items-center gap-0.5 rounded bg-forest px-1.5 py-0.5 text-[10px] font-bold text-white">
+                      <Star className="size-2.5" />Primary
+                    </span>
+                  )}
+                  {m.is_hover && (
+                    <span className="absolute left-1.5 top-1.5 inline-flex items-center gap-0.5 rounded bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                      <Eye className="size-2.5" />Hover
+                    </span>
+                  )}
+                </>
               )}
               <div className="absolute inset-0 flex flex-col justify-between bg-gradient-to-t from-ink/60 via-transparent to-transparent p-1.5 opacity-0 transition-opacity group-hover:opacity-100">
                 <div className="flex justify-start">
@@ -191,10 +221,21 @@ export function ProductMediaManager({
         <input
           type="checkbox"
           checked={primaryNext}
-          onChange={(e) => setPrimaryNext(e.target.checked)}
+          onChange={(e) => togglePrimaryNext(e.target.checked)}
           className="size-3.5 accent-[var(--color-forest)]"
         />
         Set next upload as the primary image
+      </label>
+
+      <label className="flex items-center gap-2 text-xs text-muted">
+        <input
+          type="checkbox"
+          checked={hoverNext}
+          onChange={(e) => toggleHoverNext(e.target.checked)}
+          className="size-3.5 accent-amber-500"
+        />
+        Set next upload as the hover image
+        <span className="text-faint">— shown when a shopper hovers the product card</span>
       </label>
 
       <div className="flex items-center gap-2">

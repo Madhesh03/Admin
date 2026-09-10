@@ -8,6 +8,7 @@ import {
   ExternalLink,
   FileText,
   PackageX,
+  Receipt,
   RefreshCw,
   ScrollText,
   Tag,
@@ -17,11 +18,13 @@ import {
 import {
   assignAwb,
   cancelShipment,
+  generateInvoice,
   generateLabel,
   generateManifest,
   getShipment,
   schedulePickup,
   syncShipment,
+  viewShipmentDocument,
 } from "@/lib/admin-api";
 import { courierLabel, type Shipment } from "@/lib/types";
 import { useAsync } from "@/lib/use-async";
@@ -64,6 +67,7 @@ function Detail({ shipment, onChange }: { shipment: Shipment; onChange: (s: Ship
   const { can } = useAuth();
   const manage = can("shipping.manage_shipment");
   const [busy, setBusy] = React.useState(false);
+  const [viewing, setViewing] = React.useState<string | null>(null);
 
   async function run(fn: () => Promise<Shipment>, ok: string) {
     setBusy(true);
@@ -72,12 +76,35 @@ function Detail({ shipment, onChange }: { shipment: Shipment; onChange: (s: Ship
     finally { setBusy(false); }
   }
 
+  /**
+   * Opens a document in a new tab instead of linking straight to Shiprocket's
+   * URL — Shiprocket serves some of these (manifest in particular) with
+   * `Content-Disposition: attachment`, forcing a download instead of opening
+   * like the label does. Fetching through our own proxy endpoint and handing
+   * the browser a fresh object URL displays all three the same way,
+   * regardless of what Shiprocket's own headers say.
+   */
+  async function viewDoc(docType: "label" | "manifest" | "invoice") {
+    setViewing(docType);
+    try {
+      const blob = await viewShipmentDocument(shipment.id, docType);
+      window.open(URL.createObjectURL(blob), "_blank");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not open document");
+    } finally {
+      setViewing(null);
+    }
+  }
+
   const settled = ["delivered", "failed", "returned", "cancelled"];
   const canCancel = shipment.status === "pending" || shipment.status === "booked";
   const canSync = !settled.includes(shipment.status) && !!shipment.awb;
   const canPickup =
     !!shipment.awb && (shipment.status === "pending" || shipment.status === "booked");
   const canDocs = !!shipment.awb;
+  // Invoice is keyed by the Shiprocket order, not the AWB — generatable as
+  // soon as the shipment exists, unlike label/manifest which need an AWB.
+  const canInvoice = !!shipment.shiprocket_order_id;
 
   return (
     <div className="grid gap-6 lg:grid-cols-3">
@@ -179,24 +206,41 @@ function Detail({ shipment, onChange }: { shipment: Shipment; onChange: (s: Ship
           </CardBody>
         </Card>
 
-        {(shipment.label_url || shipment.manifest_url) && (
+        {(shipment.label_url || shipment.manifest_url || shipment.invoice_url) && (
           <Card>
             <CardHeader><CardTitle>Documents</CardTitle></CardHeader>
             <CardBody className="space-y-2">
               {shipment.label_url && (
-                <Button variant="secondary" className="w-full" asChild>
-                  <a href={shipment.label_url} target="_blank" rel="noreferrer">
-                    <FileText className="size-4" />Shipping label
-                    <ExternalLink className="size-3.5" />
-                  </a>
+                <Button
+                  variant="secondary"
+                  className="w-full"
+                  loading={viewing === "label"}
+                  onClick={() => viewDoc("label")}
+                >
+                  <FileText className="size-4" />Shipping label
+                  <ExternalLink className="size-3.5" />
                 </Button>
               )}
               {shipment.manifest_url && (
-                <Button variant="secondary" className="w-full" asChild>
-                  <a href={shipment.manifest_url} target="_blank" rel="noreferrer">
-                    <ScrollText className="size-4" />Manifest
-                    <ExternalLink className="size-3.5" />
-                  </a>
+                <Button
+                  variant="secondary"
+                  className="w-full"
+                  loading={viewing === "manifest"}
+                  onClick={() => viewDoc("manifest")}
+                >
+                  <ScrollText className="size-4" />Manifest
+                  <ExternalLink className="size-3.5" />
+                </Button>
+              )}
+              {shipment.invoice_url && (
+                <Button
+                  variant="secondary"
+                  className="w-full"
+                  loading={viewing === "invoice"}
+                  onClick={() => viewDoc("invoice")}
+                >
+                  <Receipt className="size-4" />Invoice
+                  <ExternalLink className="size-3.5" />
                 </Button>
               )}
             </CardBody>
@@ -240,6 +284,17 @@ function Detail({ shipment, onChange }: { shipment: Shipment; onChange: (s: Ship
                   {shipment.manifest_url ? "Regenerate manifest" : "Generate manifest"}
                 </Button>
               )}
+              {canInvoice && (
+                <Button
+                  variant="secondary"
+                  className="w-full"
+                  loading={busy}
+                  onClick={() => run(() => generateInvoice(shipment.id), "Invoice generated")}
+                >
+                  <Receipt className="size-4" />
+                  {shipment.invoice_url ? "Regenerate invoice" : "Generate invoice"}
+                </Button>
+              )}
               {canSync && (
                 <Button
                   variant="secondary"
@@ -260,7 +315,7 @@ function Detail({ shipment, onChange }: { shipment: Shipment; onChange: (s: Ship
                   <Ban className="size-4" />Cancel shipment
                 </Button>
               )}
-              {!canPickup && !canDocs && !canSync && !canCancel && (
+              {!canPickup && !canDocs && !canInvoice && !canSync && !canCancel && (
                 <p className="text-sm text-faint">No actions available in this state.</p>
               )}
               {shipment.status === "cancelled" && (

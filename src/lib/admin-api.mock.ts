@@ -50,6 +50,7 @@ import type {
   OrderStatus,
   PageMeta,
   ProductDetail,
+  ProductDimension,
   ProductList,
   ProductMedia,
   ProductSizeStock,
@@ -249,6 +250,7 @@ function toSizeStockView(p: StoredProduct): ProductSizeStock[] {
 function toProductList(p: StoredProduct): ProductList {
   const primary = p.media.find((m) => m.is_primary && m.media_type === "image");
   const thumb = primary?.s3_key ?? p.media[0]?.s3_key ?? "";
+  const hover = p.media.find((m) => m.is_hover && m.media_type === "image");
   return {
     id: p.id,
     sku: p.sku,
@@ -272,6 +274,10 @@ function toProductList(p: StoredProduct): ProductList {
     thumbnail_key: thumb,
     primary_image: primary
       ? { s3_key: primary.s3_key, alt_text: primary.alt_text }
+      : null,
+    hover_thumbnail_key: hover?.s3_key ?? "",
+    hover_image: hover
+      ? { s3_key: hover.s3_key, alt_text: hover.alt_text }
       : null,
     created_at: p.created_at,
   };
@@ -297,9 +303,7 @@ function toProductDetail(p: StoredProduct): ProductDetail {
     purity: p.purity,
     gross_weight: p.gross_weight,
     net_weight: p.net_weight,
-    length_mm: p.length_mm,
-    width_mm: p.width_mm,
-    height_mm: p.height_mm,
+    dimensions: p.dimensions,
     stone_details: p.stone_details,
     certificate_details: p.certificate_details,
     available_sizes: p.available_sizes,
@@ -313,6 +317,7 @@ function toProductDetail(p: StoredProduct): ProductDetail {
     is_featured: p.is_featured,
     tags: p.tags,
     thumbnail_key: detailPrimaryKey(toDetailForThumb(p)) ?? "",
+    hover_thumbnail_key: p.media.find((m) => m.is_hover && m.media_type === "image")?.s3_key ?? "",
     media: p.media,
     created_at: p.created_at,
     updated_at: p.updated_at,
@@ -422,9 +427,7 @@ export interface ProductWriteInput {
   purity?: string;
   gross_weight?: number | null;
   net_weight?: number | null;
-  length_mm?: number | null;
-  width_mm?: number | null;
-  height_mm?: number | null;
+  dimensions?: ProductDimension[];
   stone_details?: StoneDetail[];
   certificate_details?: Record<string, string>;
   available_sizes?: string;
@@ -533,9 +536,7 @@ export async function createProduct(
     purity,
     gross_weight: input.gross_weight ?? null,
     net_weight: input.net_weight ?? null,
-    length_mm: input.length_mm ?? null,
-    width_mm: input.width_mm ?? null,
-    height_mm: input.height_mm ?? null,
+    dimensions: input.dimensions ?? [],
     stone_details: input.stone_details ?? [],
     certificate_details: input.certificate_details ?? {},
     available_sizes: availableSizes,
@@ -577,9 +578,7 @@ export async function updateProduct(
     ...(patch.purity != null ? { purity: patch.purity } : {}),
     ...("gross_weight" in patch ? { gross_weight: patch.gross_weight ?? null } : {}),
     ...("net_weight" in patch ? { net_weight: patch.net_weight ?? null } : {}),
-    ...("length_mm" in patch ? { length_mm: patch.length_mm ?? null } : {}),
-    ...("width_mm" in patch ? { width_mm: patch.width_mm ?? null } : {}),
-    ...("height_mm" in patch ? { height_mm: patch.height_mm ?? null } : {}),
+    ...("dimensions" in patch ? { dimensions: patch.dimensions ?? [] } : {}),
     ...(patch.stone_details != null ? { stone_details: patch.stone_details } : {}),
     ...(patch.certificate_details != null ? { certificate_details: patch.certificate_details } : {}),
     ...(patch.available_sizes != null ? { available_sizes: patch.available_sizes } : {}),
@@ -732,6 +731,7 @@ export interface ConfirmMediaInput {
   file_size?: number | null;
   alt_text?: string;
   is_primary?: boolean;
+  is_hover?: boolean;
   sort_order?: number;
 }
 
@@ -751,11 +751,17 @@ export async function confirmMedia(
     alt_text: input.alt_text ?? product.name,
     sort_order: input.sort_order ?? product.media.length,
     is_primary: input.is_primary ?? product.media.length === 0,
+    is_hover: input.is_hover ?? false,
   };
   let nextMedia = [...product.media, media];
   if (media.is_primary) {
     nextMedia = nextMedia.map((m) =>
       m.id === media.id ? m : { ...m, is_primary: false },
+    );
+  }
+  if (media.is_hover) {
+    nextMedia = nextMedia.map((m) =>
+      m.id === media.id ? m : { ...m, is_hover: false },
     );
   }
   writeProduct({ ...product, media: nextMedia, updated_at: new Date().toISOString() });
@@ -1927,6 +1933,7 @@ export async function createShipment(
     pickup_token: "",
     label_url: "",
     manifest_url: "",
+    invoice_url: "",
     last_synced_at: now,
     events: [
       {
@@ -2024,6 +2031,34 @@ export async function generateManifest(id: string): Promise<Shipment> {
       manifest_url: `https://manifests.example.com/${s.awb}.pdf`,
     }),
   );
+}
+
+export async function generateInvoice(id: string): Promise<Shipment> {
+  await tick(true);
+  requirePermission("shipping.manage_shipment");
+  const s = requireShipment(id);
+  if (!s.shiprocket_order_id) throw new ApiError("Shipment has no Shiprocket order id.");
+  return clone(
+    writeShipment({
+      ...s,
+      invoice_url: `https://invoices.example.com/${s.shiprocket_order_id}.pdf`,
+    }),
+  );
+}
+
+/** Minimal valid single-page PDF, standing in for the real proxied document. */
+export async function viewShipmentDocument(
+  id: string,
+  _docType: "label" | "manifest" | "invoice",
+): Promise<Blob> {
+  await tick(true);
+  requireShipment(id);
+  const pdf =
+    "%PDF-1.1\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n" +
+    "2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n" +
+    "3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\n" +
+    "trailer<</Root 1 0 R>>";
+  return new Blob([pdf], { type: "application/pdf" });
 }
 
 const SYNC_NEXT: Record<string, ShipmentStatus> = {

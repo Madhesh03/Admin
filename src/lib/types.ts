@@ -167,6 +167,8 @@ export interface ProductMedia {
   alt_text: string;
   sort_order: number;
   is_primary: boolean;
+  /** Shown in place of the primary image when a shopper hovers the product card. */
+  is_hover: boolean;
 }
 
 export interface StoneDetail {
@@ -197,6 +199,24 @@ export interface ProductSizeStock {
   is_in_stock: boolean;
 }
 
+/** Units a measurement can be recorded in. */
+export const DIMENSION_UNITS = ["mm", "cm", "in"] as const;
+export type DimensionUnit = (typeof DIMENSION_UNITS)[number];
+
+/**
+ * One labelled measurement on a product.
+ *
+ * A fixed length/width/height triple can't describe real jewellery — a pendant
+ * chain has a chain length, an adjustable extension AND a pendant W/H. `value`
+ * is a string so ranges ("2-6.5") survive; `unit` is per-row so a 19 cm chain
+ * and its 1.5 mm pendant can sit on the same product.
+ */
+export interface ProductDimension {
+  label: string;
+  value: string;
+  unit: DimensionUnit;
+}
+
 export interface ProductList {
   id: string;
   sku: string;
@@ -224,6 +244,10 @@ export interface ProductList {
   /** Presigned GET URL for thumbnail_key (real backend); null if S3 unset. */
   thumbnail_url?: string | null;
   primary_image: { s3_key: string; view_url?: string | null; alt_text: string } | null;
+  hover_thumbnail_key: string;
+  /** Presigned GET URL for hover_thumbnail_key (real backend); null if S3 unset. */
+  hover_thumbnail_url?: string | null;
+  hover_image: { s3_key: string; view_url?: string | null; alt_text: string } | null;
   created_at: string;
 }
 
@@ -246,10 +270,8 @@ export interface ProductDetail {
   purity: string;
   gross_weight: number | null;
   net_weight: number | null;
-  /** Physical dimensions in millimetres; null when not measured. */
-  length_mm: number | null;
-  width_mm: number | null;
-  height_mm: number | null;
+  /** Labelled measurements, in display order; [] when nothing was measured. */
+  dimensions: ProductDimension[];
   stone_details: StoneDetail[];
   certificate_details: Record<string, string>;
   available_sizes: string;
@@ -266,6 +288,9 @@ export interface ProductDetail {
   thumbnail_key: string;
   /** Presigned GET URL for thumbnail_key (real backend); null if S3 unset. */
   thumbnail_url?: string | null;
+  hover_thumbnail_key: string;
+  /** Presigned GET URL for hover_thumbnail_key (real backend); null if S3 unset. */
+  hover_thumbnail_url?: string | null;
   media: ProductMedia[];
   created_at: string;
   updated_at: string;
@@ -508,6 +533,8 @@ export interface Shipment {
   label_url: string;
   /** Handover manifest PDF; "" until generated. */
   manifest_url: string;
+  /** GST invoice PDF, generated from the parent Shiprocket order; "" until generated. */
+  invoice_url: string;
   /** Last tracking refresh, by webhook or polling; null if never. */
   last_synced_at: string | null;
   events: ShipmentEvent[];

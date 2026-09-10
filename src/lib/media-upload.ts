@@ -36,12 +36,14 @@ export async function uploadProductImage({
   fileName,
   mime,
   isPrimary,
+  isHover,
 }: {
   productId: string;
   blob: Blob;
   fileName: string;
   mime: string;
   isPrimary: boolean;
+  isHover?: boolean;
 }): Promise<ProductMedia> {
   const { presigned_url, s3_key } = await presignMedia({
     product_id: productId,
@@ -59,6 +61,7 @@ export async function uploadProductImage({
       file_name: fileName,
       mime_type: mime,
       is_primary: isPrimary,
+      is_hover: isHover,
     });
   }
 
@@ -78,6 +81,7 @@ export async function uploadProductImage({
     mime_type: mime,
     file_size: blob.size,
     is_primary: isPrimary,
+    is_hover: isHover,
   });
 }
 
@@ -139,10 +143,12 @@ export async function uploadProductImageFromUrl({
   productId,
   url,
   isPrimary,
+  isHover,
 }: {
   productId: string;
   url: string;
   isPrimary: boolean;
+  isHover?: boolean;
 }): Promise<ProductMedia> {
   if (USE_MOCKS) {
     // Mock store renders arbitrary URLs directly — no S3 round-trip.
@@ -159,6 +165,7 @@ export async function uploadProductImageFromUrl({
       file_name: "pasted-url",
       mime_type: "image/*",
       is_primary: isPrimary,
+      is_hover: isHover,
     });
   }
   const res = await fetch(url);
@@ -171,5 +178,6 @@ export async function uploadProductImageFromUrl({
     fileName: name,
     mime: blob.type || "application/octet-stream",
     isPrimary,
+    isHover,
   });
 }

@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, Search } from "lucide-react";
 import { listOrders, type ListOrdersParams, type OrderOrdering } from "@/lib/admin-api";
 import { orderCustomerName } from "@/lib/derive";
 import { ORDER_STATUSES, titleCase, type Order } from "@/lib/types";
@@ -10,10 +10,10 @@ import { useAsync, useDebouncedValue } from "@/lib/use-async";
 import { cn, formatDate, formatPrice } from "@/lib/utils";
 import { RequirePermission } from "@/components/permission-gate";
 import { PageHeader } from "@/components/layout/page-header";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input, NativeSelect } from "@/components/ui/input";
 import { OrderStatusBadge, PaymentBadge } from "@/components/ui/badge";
+import { Pagination } from "@/components/ui/pagination";
 import { EmptyState, ErrorState, TableSkeleton } from "@/components/ui/states";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 
@@ -58,9 +58,6 @@ function OrdersInner() {
   );
   const rows: Order[] = data?.items ?? [];
   const total = data?.meta.total ?? 0;
-  const lastPage = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const firstOnPage = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
-  const lastOnPage = Math.min(page * PAGE_SIZE, total);
 
   /** Toggle a column between ascending and descending. */
   function sortBy(field: "created_at" | "total_amount" | "order_number") {
@@ -128,31 +125,7 @@ function OrdersInner() {
               </TBody>
             </Table>
 
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-3">
-              <p className="text-xs text-muted">
-                Showing <span className="font-semibold text-ink">{firstOnPage}–{lastOnPage}</span> of{" "}
-                <span className="font-semibold text-ink">{total}</span>
-              </p>
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={page <= 1}
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                >
-                  <ChevronLeft className="size-4" />Previous
-                </Button>
-                <span className="text-xs text-muted">Page {page} of {lastPage}</span>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={page >= lastPage}
-                  onClick={() => setPage((p) => p + 1)}
-                >
-                  Next<ChevronRight className="size-4" />
-                </Button>
-              </div>
-            </div>
+            <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />
           </>
         )}
       </Card>

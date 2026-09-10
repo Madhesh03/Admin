@@ -3,7 +3,7 @@
  * validate server-side once the backend lands.
  */
 import { z } from "zod";
-import { METAL_TYPES, STOCK_TYPES } from "./types";
+import { DIMENSION_UNITS, METAL_TYPES, STOCK_TYPES } from "./types";
 
 export const loginSchema = z.object({
   email: z.string().trim().min(1, "Email is required").email("Enter a valid email"),
@@ -12,6 +12,12 @@ export const loginSchema = z.object({
 
 const metalEnum = z.enum(METAL_TYPES as [string, ...string[]]);
 const stockEnum = z.enum(STOCK_TYPES as [string, ...string[]]);
+
+export const dimensionSchema = z.object({
+  label: z.string().trim().min(1, "A label is required"),
+  value: z.string().trim().min(1, "A value is required"),
+  unit: z.enum(DIMENSION_UNITS),
+});
 
 export const stoneSchema = z.object({
   type: z.string().trim(),
@@ -42,9 +48,7 @@ export const productFormSchema = z.object({
   purity: z.string().trim().default("925 Sterling"),
   gross_weight: z.union([z.coerce.number().min(0), z.null()]).optional(),
   net_weight: z.union([z.coerce.number().min(0), z.null()]).optional(),
-  length_mm: z.union([z.coerce.number().min(0), z.null()]).optional(),
-  width_mm: z.union([z.coerce.number().min(0), z.null()]).optional(),
-  height_mm: z.union([z.coerce.number().min(0), z.null()]).optional(),
+  dimensions: z.array(dimensionSchema).default([]),
   stone_details: z.array(stoneSchema).default([]),
   certificate_details: z.record(z.string(), z.string()).default({}),
   available_sizes: z.string().trim().default(""),

@@ -55,6 +55,32 @@ export function useAsync<T>(
   return { data, loading, error, reload, setData };
 }
 
+/**
+ * Client-side pagination over an already-fetched array — for list endpoints
+ * that return everything in one response (no server-side page/page_size).
+ * Slices `rows` into pages of `pageSize`, clamping the current page down when
+ * a shrinking result set (a new filter, a deletion) would leave it out of
+ * range. For endpoints the server itself paginates (page/page_size params,
+ * `meta.total` in the response), pass page state through to the API call
+ * instead — see the Products/Returns pages for that pattern.
+ */
+export function usePagination<T>(rows: T[], pageSize = 20) {
+  const [page, setPage] = React.useState(1);
+  const total = rows.length;
+  const lastPage = Math.max(1, Math.ceil(total / pageSize));
+
+  React.useEffect(() => {
+    if (page > lastPage) setPage(lastPage);
+  }, [lastPage, page]);
+
+  const pageRows = React.useMemo(
+    () => rows.slice((page - 1) * pageSize, page * pageSize),
+    [rows, page, pageSize],
+  );
+
+  return { page, setPage, pageRows, total, pageSize, lastPage };
+}
+
 /** Debounce a rapidly-changing value (e.g. a search box) by `delay` ms. */
 export function useDebouncedValue<T>(value: T, delay = 300): T {
   const [debounced, setDebounced] = React.useState(value);

@@ -2,7 +2,7 @@
 
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { LogOut, Menu, Building2 } from "lucide-react";
+import { LogOut, Menu } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
 import { ALL_NAV_ITEMS, NAV_GROUPS } from "./nav";
 import { PendingOrdersBadge } from "./pending-orders-badge";
@@ -21,7 +21,7 @@ function initials(first: string, last: string) {
 }
 
 export function Topbar() {
-  const { staff, tenantId, logout, can } = useAuth();
+  const { staff, logout, can } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -63,10 +63,6 @@ export function Topbar() {
       </div>
 
       <div className="flex items-center gap-3">
-        <span className="hidden items-center gap-1.5 rounded-full bg-surface px-2.5 py-1 text-xs font-medium text-muted sm:flex">
-          <Building2 className="size-3.5" />
-          {tenantId}
-        </span>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 transition-colors hover:bg-surface">

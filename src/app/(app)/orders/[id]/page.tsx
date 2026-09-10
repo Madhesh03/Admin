@@ -3,8 +3,8 @@
 import * as React from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ClipboardList, PackageX, User, IndianRupee, Truck } from "lucide-react";
-import { getOrder, initiateRefund, updateOrderStatus } from "@/lib/admin-api";
+import { PackageX, User, Truck } from "lucide-react";
+import { getOrder, updateOrderStatus } from "@/lib/admin-api";
 import { orderCustomerName } from "@/lib/derive";
 import {
   ORDER_TRANSITIONS,
@@ -18,11 +18,10 @@ import { useAuth } from "@/components/auth-provider";
 import { RequirePermission } from "@/components/permission-gate";
 import { PageHeader } from "@/components/layout/page-header";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
-import { NativeSelect, Field, Input, Textarea } from "@/components/ui/input";
+import { NativeSelect, Field, Textarea } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { OrderStatusBadge, PaymentBadge } from "@/components/ui/badge";
 import { Thumb } from "@/components/ui/thumb";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import { toast } from "@/components/ui/toast";
 import { OrderTimeline } from "@/components/orders/order-timeline";
@@ -71,7 +70,6 @@ function OrderDetail({
   const [pending, setPending] = React.useState<OrderStatus | "">("");
   const [note, setNote] = React.useState("");
   const [busy, setBusy] = React.useState(false);
-  const [refundOpen, setRefundOpen] = React.useState(false);
   const [bookOpen, setBookOpen] = React.useState(false);
   // Bumped whenever something may have changed the shipment or the messages
   // sent, so the two panels below refetch without a full page reload.
@@ -97,10 +95,6 @@ function OrderDetail({
       setBusy(false);
     }
   }
-
-  const canRefund =
-    can("orders.process_refund") &&
-    (order.payment_status === "captured" || order.payment_status === "partially_refunded");
 
   return (
     <div className="grid gap-6 lg:grid-cols-3">
@@ -190,20 +184,9 @@ function OrderDetail({
               <p className="text-sm text-faint">You can view this order but not change it.</p>
             )}
 
-            <Button variant="secondary" className="w-full" asChild>
-              <Link href={`/orders/${order.id}/packing-slip`}>
-                <ClipboardList className="size-4" />Packing slip
-              </Link>
-            </Button>
-
             {order.status === "processing" && can("shipping.manage_shipment") && (
               <Button variant="secondary" className="w-full" onClick={() => setBookOpen(true)}>
                 <Truck className="size-4" />Book shipment
-              </Button>
-            )}
-            {canRefund && (
-              <Button variant="secondary" className="w-full" onClick={() => setRefundOpen(true)}>
-                <IndianRupee className="size-4" />Issue refund
               </Button>
             )}
           </CardBody>
@@ -249,65 +232,7 @@ function OrderDetail({
         onOpenChange={setBookOpen}
         onBooked={() => { refreshSide(); onReload(); }}
       />
-      <RefundDialog
-        order={order}
-        open={refundOpen}
-        onOpenChange={setRefundOpen}
-        onDone={(o) => { onChange(o); refreshSide(); }}
-      />
     </div>
-  );
-}
-
-function RefundDialog({
-  order,
-  open,
-  onOpenChange,
-  onDone,
-}: {
-  order: Order;
-  open: boolean;
-  onOpenChange: (o: boolean) => void;
-  onDone: (o: Order) => void;
-}) {
-  const [amount, setAmount] = React.useState("");
-  const [reason, setReason] = React.useState("");
-  const [busy, setBusy] = React.useState(false);
-
-  React.useEffect(() => { if (open) { setAmount(""); setReason(""); } }, [open]);
-
-  async function submit() {
-    setBusy(true);
-    try {
-      await initiateRefund(order.id, amount ? Number(amount) : null, reason || undefined);
-      toast.success("Refund initiated");
-      const updated = await getOrder(order.id);
-      if (updated) onDone(updated);
-      onOpenChange(false);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Refund failed");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent title="Issue refund" description={`Order ${order.order_number} · captured ${formatPrice(order.total_amount)}`}>
-        <div className="space-y-4">
-          <Field label="Amount (₹)" htmlFor="amt" hint="Leave blank for a full refund">
-            <Input id="amt" inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={String(order.total_amount)} />
-          </Field>
-          <Field label="Reason" htmlFor="reason">
-            <Input id="reason" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Customer request" />
-          </Field>
-          <div className="flex justify-end gap-2">
-            <Button variant="secondary" size="sm" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button size="sm" loading={busy} onClick={submit}>Issue refund</Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
   );
 }
 

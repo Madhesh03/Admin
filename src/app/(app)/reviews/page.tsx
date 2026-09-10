@@ -4,7 +4,7 @@ import * as React from "react";
 import { Star, Check } from "lucide-react";
 import { approveReview, listReviews } from "@/lib/admin-api";
 import type { Review } from "@/lib/types";
-import { useAsync } from "@/lib/use-async";
+import { useAsync, usePagination } from "@/lib/use-async";
 import { formatDate, cn } from "@/lib/utils";
 import { useAuth } from "@/components/auth-provider";
 import { RequirePermission } from "@/components/permission-gate";
@@ -13,6 +13,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Pagination } from "@/components/ui/pagination";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import { toast } from "@/components/ui/toast";
 
@@ -43,6 +44,10 @@ function ReviewsInner() {
     [filter],
   );
   const [busyId, setBusyId] = React.useState<string | null>(null);
+  const { page, setPage, pageRows, total } = usePagination(data ?? [], 10);
+  React.useEffect(() => {
+    setPage(1);
+  }, [filter, setPage]);
 
   async function approve(r: Review) {
     setBusyId(r.id);
@@ -76,7 +81,7 @@ function ReviewsInner() {
         <Card><EmptyState icon={Star} title="Nothing here" description="No reviews match this filter." /></Card>
       ) : (
         <div className="space-y-3">
-          {data.map((r) => (
+          {pageRows.map((r) => (
             <Card key={r.id}>
               <div className="flex flex-wrap items-start justify-between gap-3 p-5">
                 <div className="min-w-0 flex-1">
@@ -102,6 +107,9 @@ function ReviewsInner() {
               </div>
             </Card>
           ))}
+          <Card>
+            <Pagination page={page} pageSize={10} total={total} onPageChange={setPage} />
+          </Card>
         </div>
       )}
     </div>

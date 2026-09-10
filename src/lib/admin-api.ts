@@ -147,6 +147,8 @@ export const assignAwb = USE_MOCKS ? mock.assignAwb : real.assignAwb;
 export const schedulePickup = USE_MOCKS ? mock.schedulePickup : real.schedulePickup;
 export const generateLabel = USE_MOCKS ? mock.generateLabel : real.generateLabel;
 export const generateManifest = USE_MOCKS ? mock.generateManifest : real.generateManifest;
+export const generateInvoice = USE_MOCKS ? mock.generateInvoice : real.generateInvoice;
+export const viewShipmentDocument = USE_MOCKS ? mock.viewShipmentDocument : real.viewShipmentDocument;
 export const syncShipment = USE_MOCKS ? mock.syncShipment : real.syncShipment;
 export const cancelShipment = USE_MOCKS ? mock.cancelShipment : real.cancelShipment;
 

@@ -18,12 +18,14 @@ import { uploadProductImage } from "@/lib/media-upload";
 import { effectivePrice, nameCode, skuStem, variationSku } from "@/lib/derive";
 import { productFormSchema } from "@/lib/schemas";
 import {
+  DIMENSION_UNITS,
   METAL_LABEL,
   METAL_TYPES,
   STOCK_TYPES,
   titleCase,
   type Category,
   type Collection,
+  type DimensionUnit,
   type MetalType,
   type ProductDetail,
   type ProductStatus,
@@ -42,6 +44,8 @@ import { ProductSizeStock } from "./product-size-stock";
 
 interface Stone { type: string; weight: string; quality: string; count: string }
 interface Cert { key: string; value: string }
+/** One labelled measurement. Free-text `value` so ranges ("2-6.5") survive. */
+interface Dimension { label: string; value: string; unit: DimensionUnit }
 /** One editable variation row (WooCommerce-style): a value + its own SKU/price/weight. */
 interface Variant { size: string; sku: string; price: string; weight: string; active: boolean }
 
@@ -59,9 +63,7 @@ interface FormState {
   status: ProductStatus;
   gross_weight: string;
   net_weight: string;
-  length_mm: string;
-  width_mm: string;
-  height_mm: string;
+  dimensions: Dimension[];
   variant_label: string;
   size_unit: string;
   variants: Variant[];
@@ -78,7 +80,7 @@ function toState(p?: ProductDetail): FormState {
       name: "", sku: "", metal_type: "silver", category_id: "", collection_id: "",
       description: "", price: "", discount_percent: "0", purity: "925 Sterling",
       stock_type: "quantity", status: "draft", gross_weight: "", net_weight: "",
-      length_mm: "", width_mm: "", height_mm: "",
+      dimensions: [],
       variant_label: "", size_unit: "", variants: [],
       care_instruction: "", is_featured: false,
       tags: "", stones: [], certs: [],
@@ -97,9 +99,11 @@ function toState(p?: ProductDetail): FormState {
     status: p.status,
     gross_weight: p.gross_weight != null ? String(p.gross_weight) : "",
     net_weight: p.net_weight != null ? String(p.net_weight) : "",
-    length_mm: p.length_mm != null ? String(p.length_mm) : "",
-    width_mm: p.width_mm != null ? String(p.width_mm) : "",
-    height_mm: p.height_mm != null ? String(p.height_mm) : "",
+    dimensions: (p.dimensions ?? []).map((d) => ({
+      label: d.label,
+      value: String(d.value),
+      unit: (DIMENSION_UNITS as readonly string[]).includes(d.unit) ? (d.unit as DimensionUnit) : "mm",
+    })),
     variant_label: p.variant_label,
     size_unit: p.size_unit,
     variants: p.size_stock.map((v) => ({
@@ -213,9 +217,9 @@ export function ProductForm({
       purity: form.purity,
       gross_weight: form.gross_weight ? Number(form.gross_weight) : null,
       net_weight: form.net_weight ? Number(form.net_weight) : null,
-      length_mm: form.length_mm ? Number(form.length_mm) : null,
-      width_mm: form.width_mm ? Number(form.width_mm) : null,
-      height_mm: form.height_mm ? Number(form.height_mm) : null,
+      dimensions: form.dimensions
+        .filter((d) => d.label.trim() && d.value.trim())
+        .map((d) => ({ label: d.label.trim(), value: d.value.trim(), unit: d.unit })),
       stone_details: form.stones
         .filter((s) => s.type.trim())
         .map((s) => ({ type: s.type, weight: s.weight, quality: s.quality, count: Number(s.count) || 0 })),
@@ -244,6 +248,7 @@ export function ProductForm({
           fileName: p.file.name,
           mime: p.file.type || "application/octet-stream",
           isPrimary: p.isPrimary,
+          isHover: p.isHover,
         });
       } catch {
         failed++;
@@ -334,6 +339,41 @@ export function ProductForm({
   const rmVariant = (i: number) => set("variants", form.variants.filter((_, x) => x !== i));
   const axisLabel = form.variant_label.trim() || "Size";
 
+  const addDimension = (preset?: { label: string; unit: DimensionUnit }) =>
+    set("dimensions", [...form.dimensions, { label: preset?.label ?? "", value: "", unit: preset?.unit ?? "mm" }]);
+  const setDimension = (i: number, k: keyof Dimension, v: string) =>
+    setForm((f) => { const rows = f.dimensions.slice(); rows[i] = { ...rows[i], [k]: v }; return { ...f, dimensions: rows }; });
+  const rmDimension = (i: number) => set("dimensions", form.dimensions.filter((_, x) => x !== i));
+  // Suggested rows per category — a starting point, not a constraint. Every row
+  // stays fully editable/removable; jewellery shapes don't reduce to a fixed
+  // length/width/height triple (a necklace alone has a chain length, an
+  // adjustable extension AND a pendant width/height).
+  const DIMENSION_SUGGESTIONS: Record<string, { label: string; unit: DimensionUnit }[]> = {
+    necklaces: [
+      { label: "Chain length", unit: "cm" },
+      { label: "Adjustable extension", unit: "cm" },
+      { label: "Pendant width", unit: "mm" },
+      { label: "Pendant height", unit: "mm" },
+    ],
+    earrings: [
+      { label: "Width", unit: "mm" },
+      { label: "Height", unit: "mm" },
+    ],
+    bracelets: [
+      { label: "Length", unit: "cm" },
+      { label: "Width", unit: "mm" },
+    ],
+    sets: [
+      { label: "Chain length", unit: "cm" },
+      { label: "Pendant width", unit: "mm" },
+      { label: "Pendant height", unit: "mm" },
+      { label: "Earring width", unit: "mm" },
+      { label: "Earring height", unit: "mm" },
+    ],
+  };
+  const selectedCategorySlug = (cats.data ?? []).find((c) => c.id === form.category_id)?.slug ?? "";
+  const dimensionSuggestions = DIMENSION_SUGGESTIONS[selectedCategorySlug] ?? [];
+
   // Live SKU previews (read-only). The self-describing product SKU is generated
   // on save: SOIS-<category>-<metal><purity>-<name>. Each variation's SKU is
   // that code + size. Shown so staff see exactly what will be stored.
@@ -423,11 +463,73 @@ export function ProductForm({
           <CardBody className="grid gap-4 sm:grid-cols-2">
             <Field label="Gross weight (g)" htmlFor="gw"><Input id="gw" inputMode="decimal" value={form.gross_weight} onChange={(e) => set("gross_weight", e.target.value)} /></Field>
             <Field label="Net weight (g)" htmlFor="nw"><Input id="nw" inputMode="decimal" value={form.net_weight} onChange={(e) => set("net_weight", e.target.value)} /></Field>
-            <div className="grid grid-cols-3 gap-4 sm:col-span-2">
-              <Field label="Length (mm)" htmlFor="len"><Input id="len" inputMode="decimal" value={form.length_mm} onChange={(e) => set("length_mm", e.target.value)} placeholder="18" /></Field>
-              <Field label="Width (mm)" htmlFor="wid"><Input id="wid" inputMode="decimal" value={form.width_mm} onChange={(e) => set("width_mm", e.target.value)} placeholder="6" /></Field>
-              <Field label="Height (mm)" htmlFor="hgt"><Input id="hgt" inputMode="decimal" value={form.height_mm} onChange={(e) => set("height_mm", e.target.value)} placeholder="3" /></Field>
+
+            <div className="space-y-2 sm:col-span-2">
+              <div className="flex items-center justify-between">
+                <Label>Dimensions</Label>
+                <Button type="button" variant="secondary" size="sm" onClick={() => addDimension()}>
+                  <Plus className="size-4" />Add measurement
+                </Button>
+              </div>
+
+              {dimensionSuggestions.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {dimensionSuggestions
+                    .filter((s) => !form.dimensions.some((d) => d.label.trim().toLowerCase() === s.label.toLowerCase()))
+                    .map((s) => (
+                      <button
+                        key={s.label}
+                        type="button"
+                        onClick={() => addDimension(s)}
+                        className="rounded-full border border-line-strong px-2.5 py-1 text-xs text-muted hover:bg-subtle"
+                      >
+                        + {s.label}
+                      </button>
+                    ))}
+                </div>
+              )}
+
+              {form.dimensions.length === 0 ? (
+                <p className="rounded-lg border border-dashed border-line-strong p-3 text-sm text-muted">
+                  No measurements yet. Use a suggestion above or add one — a
+                  necklace can carry a chain length, an adjustable extension AND
+                  a pendant width/height, each with its own unit.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  <div className="hidden gap-2 px-1 text-xs font-semibold text-faint sm:grid sm:grid-cols-[1fr_120px_90px_auto]">
+                    <span>Label</span><span>Value</span><span>Unit</span><span />
+                  </div>
+                  {form.dimensions.map((d, i) => (
+                    <div key={i} className="grid grid-cols-2 gap-2 sm:grid-cols-[1fr_120px_90px_auto] sm:items-center">
+                      <Input
+                        value={d.label}
+                        onChange={(e) => setDimension(i, "label", e.target.value)}
+                        placeholder="e.g. Chain length"
+                        aria-label="Dimension label"
+                      />
+                      <Input
+                        value={d.value}
+                        onChange={(e) => setDimension(i, "value", e.target.value)}
+                        placeholder="e.g. 19 or 2-6.5"
+                        aria-label="Dimension value"
+                      />
+                      <NativeSelect
+                        value={d.unit}
+                        onChange={(e) => setDimension(i, "unit", e.target.value)}
+                        aria-label="Unit"
+                      >
+                        {DIMENSION_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                      </NativeSelect>
+                      <Button type="button" variant="ghost" size="icon" onClick={() => rmDimension(i)}>
+                        <Trash2 className="size-4 text-faint" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
+
             <Field label="Tags" htmlFor="tags" hint="Comma-separated" className="sm:col-span-2"><Input id="tags" value={form.tags} onChange={(e) => set("tags", e.target.value)} placeholder="new, bestseller" /></Field>
             <Field label="Care instructions" htmlFor="care" className="sm:col-span-2"><Textarea id="care" value={form.care_instruction} onChange={(e) => set("care_instruction", e.target.value)} /></Field>
           </CardBody>

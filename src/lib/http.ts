@@ -291,5 +291,33 @@ export function apiGetEnvelope<T>(
   return requestEnvelope<T>("GET", path, { query, auth });
 }
 
+/**
+ * GET a binary response (a PDF, not JSON) as a Blob — the label/manifest/
+ * invoice proxy endpoints. Shares baseHeaders/buildUrl and the same
+ * single-flight 401-refresh-and-retry as requestEnvelope, but can't reuse it
+ * directly since that assumes a JSON envelope body.
+ */
+export async function apiGetBlob(
+  path: string,
+  _retried = false,
+): Promise<Blob> {
+  const res = await fetch(buildUrl(path), { headers: baseHeaders(true) });
+
+  if (res.status === 401 && !_retried) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) return apiGetBlob(path, true);
+    writeSession(null);
+    throw new ApiError("Session expired.", 401);
+  }
+
+  if (!res.ok) {
+    // Error responses here are still the standard JSON envelope.
+    const payload = (await res.json().catch(() => null)) as Envelope<unknown> | null;
+    throw toApiError(res.status, payload);
+  }
+
+  return res.blob();
+}
+
 /** POST returning the full envelope (rarely needed). */
 export { requestEnvelope };

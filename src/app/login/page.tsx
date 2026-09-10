@@ -6,7 +6,6 @@ import { Gem } from "lucide-react";
 import { getSession, login } from "@/lib/admin-api";
 import { loginSchema } from "@/lib/schemas";
 import { useAuth } from "@/components/auth-provider";
-import { ADMIN_PASSWORD, DEMO_LOGINS } from "@/lib/auth-config";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
@@ -46,12 +45,6 @@ export default function LoginPage() {
     }
   }
 
-  function quickLogin(demoEmail: string) {
-    setEmail(demoEmail);
-    setPassword(ADMIN_PASSWORD);
-    submit(demoEmail, ADMIN_PASSWORD);
-  }
-
   return (
     <div className="grid min-h-screen lg:grid-cols-2">
       <div className="relative hidden flex-col justify-between bg-forest p-12 text-white lg:flex">
@@ -77,7 +70,7 @@ export default function LoginPage() {
         <div className="w-full max-w-sm">
           <h1 className="text-2xl font-bold text-ink">Staff sign in</h1>
           <p className="mt-1 text-sm text-muted">
-            Enter your credentials, or use a demo role below.
+            Enter your credentials to continue.
           </p>
 
           <form
@@ -113,29 +106,6 @@ export default function LoginPage() {
               Sign in
             </Button>
           </form>
-
-          <div className="mt-6">
-            <p className="mb-2 text-xs font-semibold text-faint">
-              Demo roles (password: {ADMIN_PASSWORD})
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              {DEMO_LOGINS.map((d) => (
-                <button
-                  key={d.email}
-                  onClick={() => quickLogin(d.email)}
-                  disabled={submitting}
-                  className="rounded-lg border border-line-strong bg-white px-3 py-2 text-left transition-colors hover:border-forest disabled:opacity-60"
-                >
-                  <span className="block text-xs font-bold capitalize text-ink">
-                    {d.role.replace(/_/g, " ")}
-                  </span>
-                  <span className="block truncate text-[11px] text-faint">
-                    {d.email}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
       </div>
     </div>

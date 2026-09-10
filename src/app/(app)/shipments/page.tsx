@@ -11,13 +11,14 @@ import {
   type ShipmentStatus,
 } from "@/lib/types";
 import { listShipments } from "@/lib/admin-api";
-import { useAsync, useDebouncedValue } from "@/lib/use-async";
+import { useAsync, useDebouncedValue, usePagination } from "@/lib/use-async";
 import { formatDate, formatPrice } from "@/lib/utils";
 import { RequirePermission } from "@/components/permission-gate";
 import { PageHeader } from "@/components/layout/page-header";
 import { Card } from "@/components/ui/card";
 import { Input, NativeSelect } from "@/components/ui/input";
 import { ShipmentStatusBadge } from "@/components/ui/badge";
+import { Pagination } from "@/components/ui/pagination";
 import { EmptyState, ErrorState, TableSkeleton } from "@/components/ui/states";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 
@@ -43,6 +44,10 @@ function Inner() {
       }),
     [status, debouncedAwb],
   );
+  const { page, setPage, pageRows, total } = usePagination(data ?? [], 20);
+  React.useEffect(() => {
+    setPage(1);
+  }, [status, debouncedAwb, setPage]);
 
   return (
     <div>
@@ -65,6 +70,7 @@ function Inner() {
         ) : !data || data.length === 0 ? (
           <EmptyState title="No shipments" />
         ) : (
+          <>
           <Table>
             <THead>
               <tr>
@@ -77,7 +83,7 @@ function Inner() {
               </tr>
             </THead>
             <TBody>
-              {data.map((s) => (
+              {pageRows.map((s) => (
                 <Tr key={s.id} clickable onClick={() => router.push(`/shipments/${s.id}`)}>
                   <Td className="font-semibold text-ink">{s.order_number}</Td>
                   <Td className="text-muted">
@@ -99,6 +105,8 @@ function Inner() {
               ))}
             </TBody>
           </Table>
+          <Pagination page={page} pageSize={20} total={total} onPageChange={setPage} />
+          </>
         )}
       </Card>
     </div>

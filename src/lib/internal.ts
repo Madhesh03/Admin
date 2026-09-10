@@ -9,6 +9,7 @@ import type {
   ProductMedia,
   ProductStatus,
   StockType,
+  ProductDimension,
   StoneDetail,
 } from "./types";
 
@@ -39,9 +40,7 @@ export interface StoredProduct {
   purity: string;
   gross_weight: number | null;
   net_weight: number | null;
-  length_mm: number | null;
-  width_mm: number | null;
-  height_mm: number | null;
+  dimensions: ProductDimension[];
   stone_details: StoneDetail[];
   certificate_details: Record<string, string>;
   available_sizes: string;

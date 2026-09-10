@@ -20,6 +20,7 @@
 import {
   apiDelete,
   apiGet,
+  apiGetBlob,
   apiGetEnvelope,
   apiGetList,
   apiPatch,
@@ -575,6 +576,26 @@ export async function generateManifest(id: string): Promise<Shipment> {
   return normalizeShipment(
     await apiPost<Shipment>(`/shipping/staff/shipments/${id}/manifest/`),
   );
+}
+
+export async function generateInvoice(id: string): Promise<Shipment> {
+  return normalizeShipment(
+    await apiPost<Shipment>(`/shipping/staff/shipments/${id}/invoice/`),
+  );
+}
+
+/**
+ * Fetches a previously-generated label/manifest/invoice PDF through our own
+ * backend (which proxies it from Shiprocket and forces `Content-Disposition:
+ * inline`) rather than linking straight to Shiprocket's URL — some of those
+ * (manifest in particular) come back as a forced download instead of opening
+ * in the tab. Caller turns the blob into an object URL and opens it.
+ */
+export function viewShipmentDocument(
+  id: string,
+  docType: "label" | "manifest" | "invoice",
+): Promise<Blob> {
+  return apiGetBlob(`/shipping/staff/shipments/${id}/documents/${docType}/`);
 }
 
 export async function syncShipment(id: string): Promise<Shipment> {

@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Upload, Trash2, Star, ImagePlus, ZoomIn } from "lucide-react";
+import { Upload, Trash2, Star, Eye, ImagePlus, ZoomIn } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ImageZoomModal } from "@/components/ui/image-zoom";
 
@@ -10,6 +10,8 @@ export interface PendingImage {
   file: File;
   url: string; // object URL for local preview
   isPrimary: boolean;
+  /** Shown in place of the primary image when a shopper hovers the product card. */
+  isHover: boolean;
 }
 
 /** Create a PendingImage (with a preview object URL) from a File. */
@@ -19,14 +21,17 @@ function toPending(file: File, isPrimary: boolean): PendingImage {
     file,
     url: URL.createObjectURL(file),
     isPrimary,
+    isHover: false,
   };
 }
 
 /**
  * Image picker for the *new* product page. Images can be dragged in or browsed,
- * are previewed instantly from a local object URL, reordered by primary, and
- * zoomed — but nothing is uploaded until the product is created (there is no
- * product id yet). The parent uploads `value` after createProduct succeeds.
+ * are previewed instantly from a local object URL, one marked primary and/or a
+ * different one marked hover (the image swapped in when a shopper hovers the
+ * product card), and zoomed — but nothing is uploaded until the product is
+ * created (there is no product id yet). The parent uploads `value` after
+ * createProduct succeeds.
  */
 export function PendingImagePicker({
   value,
@@ -60,7 +65,8 @@ export function PendingImagePicker({
     const target = value.find((p) => p.id === id);
     if (target) URL.revokeObjectURL(target.url);
     let next = value.filter((p) => p.id !== id);
-    // Promote a new primary if we removed the current one.
+    // Promote a new primary if we removed the current one. Hover has no
+    // forced replacement — a product can validly have none.
     if (target?.isPrimary && next.length && !next.some((p) => p.isPrimary)) {
       next = next.map((p, i) => (i === 0 ? { ...p, isPrimary: true } : p));
     }
@@ -68,7 +74,17 @@ export function PendingImagePicker({
   }
 
   function makePrimary(id: string) {
-    onChange(value.map((p) => ({ ...p, isPrimary: p.id === id })));
+    // Primary and hover are mutually exclusive on the same image (the swap
+    // would be a no-op), so claiming primary here clears hover if it was set.
+    onChange(value.map((p) => ({ ...p, isPrimary: p.id === id, isHover: p.id === id ? false : p.isHover })));
+  }
+
+  function makeHover(id: string) {
+    onChange(value.map((p) => ({ ...p, isHover: p.id === id, isPrimary: p.id === id ? false : p.isPrimary })));
+  }
+
+  function clearHover(id: string) {
+    onChange(value.map((p) => (p.id === id ? { ...p, isHover: false } : p)));
   }
 
   return (
@@ -120,7 +136,7 @@ export function PendingImagePicker({
                 key={p.id}
                 className={cn(
                   "group relative aspect-square overflow-hidden rounded-lg border",
-                  p.isPrimary ? "border-forest ring-1 ring-forest/30" : "border-line",
+                  p.isPrimary ? "border-forest ring-1 ring-forest/30" : p.isHover ? "border-amber-500 ring-1 ring-amber-500/30" : "border-line",
                 )}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -129,6 +145,11 @@ export function PendingImagePicker({
                 {p.isPrimary && (
                   <span className="absolute left-1.5 top-1.5 inline-flex items-center gap-0.5 rounded bg-forest px-1.5 py-0.5 text-[10px] font-bold text-white">
                     <Star className="size-2.5" />Primary
+                  </span>
+                )}
+                {p.isHover && (
+                  <span className="absolute left-1.5 top-1.5 inline-flex items-center gap-0.5 rounded bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                    <Eye className="size-2.5" />Hover
                   </span>
                 )}
 
@@ -145,18 +166,39 @@ export function PendingImagePicker({
                     </button>
                   </div>
                   <div className="flex items-center justify-between gap-1">
-                    {!p.isPrimary ? (
-                      <button
-                        type="button"
-                        title="Set as primary"
-                        onClick={() => makePrimary(p.id)}
-                        className="rounded bg-white/90 p-1 text-forest hover:bg-white"
-                      >
-                        <Star className="size-3.5" />
-                      </button>
-                    ) : (
-                      <span />
-                    )}
+                    <div className="flex gap-1">
+                      {!p.isPrimary && (
+                        <button
+                          type="button"
+                          title="Set as primary"
+                          onClick={() => makePrimary(p.id)}
+                          className="rounded bg-white/90 p-1 text-forest hover:bg-white"
+                        >
+                          <Star className="size-3.5" />
+                        </button>
+                      )}
+                      {p.isHover ? (
+                        <button
+                          type="button"
+                          title="Unset as hover image"
+                          onClick={() => clearHover(p.id)}
+                          className="rounded bg-amber-500 p-1 text-white hover:bg-amber-600"
+                        >
+                          <Eye className="size-3.5" />
+                        </button>
+                      ) : (
+                        !p.isPrimary && (
+                          <button
+                            type="button"
+                            title="Set as hover image"
+                            onClick={() => makeHover(p.id)}
+                            className="rounded bg-white/90 p-1 text-amber-600 hover:bg-white"
+                          >
+                            <Eye className="size-3.5" />
+                          </button>
+                        )
+                      )}
+                    </div>
                     <button
                       type="button"
                       title="Remove"

@@ -11,7 +11,7 @@ import {
 } from "@/lib/admin-api";
 import { staffSchema } from "@/lib/schemas";
 import type { Role, StaffUser } from "@/lib/types";
-import { useAsync } from "@/lib/use-async";
+import { useAsync, usePagination } from "@/lib/use-async";
 import { formatDate } from "@/lib/utils";
 import { RequirePermission } from "@/components/permission-gate";
 import { PageHeader } from "@/components/layout/page-header";
@@ -19,6 +19,7 @@ import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Field, Input, NativeSelect } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Pagination } from "@/components/ui/pagination";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { EmptyState, ErrorState, TableSkeleton } from "@/components/ui/states";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
@@ -36,6 +37,7 @@ function Inner() {
   const staff = useAsync<StaffUser[]>(() => listStaff(), []);
   const roles = useAsync<Role[]>(() => listRoles(), []);
   const [dialog, setDialog] = React.useState<{ mode: "new" } | { mode: "role"; user: StaffUser } | null>(null);
+  const { page, setPage, pageRows, total } = usePagination(staff.data ?? [], 20);
 
   return (
     <div className="space-y-6">
@@ -54,10 +56,11 @@ function Inner() {
         ) : !staff.data || staff.data.length === 0 ? (
           <EmptyState title="No staff users" />
         ) : (
+          <>
           <Table>
             <THead><tr><Th>User</Th><Th>Role</Th><Th>Status</Th><Th>Since</Th><Th /></tr></THead>
             <TBody>
-              {staff.data.map((u) => (
+              {pageRows.map((u) => (
                 <Tr key={u.id}>
                   <Td>
                     <p className="font-semibold text-ink">{u.first_name} {u.last_name}</p>
@@ -71,6 +74,8 @@ function Inner() {
               ))}
             </TBody>
           </Table>
+          <Pagination page={page} pageSize={20} total={total} onPageChange={setPage} />
+          </>
         )}
       </Card>
 

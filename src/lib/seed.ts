@@ -75,6 +75,9 @@ function makeMedia(name: string, metal: MetalType, count = 3): ProductMedia[] {
     alt_text: `${name} — view ${i + 1}`,
     sort_order: i,
     is_primary: i === 0,
+    // Second image (when there is one) doubles as the hover image, so every
+    // seeded demo product shows the hover-swap effect out of the box.
+    is_hover: count > 1 && i === 1,
   }));
 }
 
@@ -315,9 +318,11 @@ function makeProduct(input: PInput): StoredProduct {
     purity,
     gross_weight: Math.round((3 + Math.random() * 6) * 100) / 100,
     net_weight: netWeight,
-    length_mm: Math.round((10 + Math.random() * 40) * 10) / 10,
-    width_mm: Math.round((5 + Math.random() * 20) * 10) / 10,
-    height_mm: Math.round((2 + Math.random() * 10) * 10) / 10,
+    dimensions: [
+      { label: "Length", value: String(Math.round((10 + Math.random() * 40) * 10) / 10), unit: "mm" as const },
+      { label: "Width", value: String(Math.round((5 + Math.random() * 20) * 10) / 10), unit: "mm" as const },
+      { label: "Height", value: String(Math.round((2 + Math.random() * 10) * 10) / 10), unit: "mm" as const },
+    ],
     stone_details: input.stones ?? [],
     certificate_details: input.stones?.length
       ? { BIS: "Hallmarked", Purity: "92.5%", Certification: "SGL" }
@@ -641,7 +646,7 @@ type SeedShipment = Omit<
   | "courier_id" | "courier_name"
   | "length_cm" | "breadth_cm" | "height_cm" | "freight_charge"
   | "pickup_scheduled_at" | "pickup_token"
-  | "label_url" | "manifest_url" | "last_synced_at"
+  | "label_url" | "manifest_url" | "invoice_url" | "last_synced_at"
 > &
   Partial<Shipment>;
 
@@ -657,6 +662,7 @@ function completeShipment(s: SeedShipment): Shipment {
     pickup_token: "",
     label_url: "",
     manifest_url: "",
+    invoice_url: "",
     last_synced_at: s.updated_at,
     ...s,
   };

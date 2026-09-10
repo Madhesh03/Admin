@@ -5,12 +5,13 @@ import { useRouter } from "next/navigation";
 import { Search } from "lucide-react";
 import { listCustomers } from "@/lib/admin-api";
 import type { Customer } from "@/lib/types";
-import { useAsync, useDebouncedValue } from "@/lib/use-async";
+import { useAsync, useDebouncedValue, usePagination } from "@/lib/use-async";
 import { formatDate, formatPrice } from "@/lib/utils";
 import { RequirePermission } from "@/components/permission-gate";
 import { PageHeader } from "@/components/layout/page-header";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Pagination } from "@/components/ui/pagination";
 import { EmptyState, ErrorState, TableSkeleton } from "@/components/ui/states";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 
@@ -30,6 +31,10 @@ function CustomersInner() {
   const [search, setSearch] = React.useState("");
   const debounced = useDebouncedValue(search);
   const { data, loading, error, reload } = useAsync<Customer[]>(() => listCustomers({ search: debounced }), [debounced]);
+  const { page, setPage, pageRows, total } = usePagination(data ?? [], 20);
+  React.useEffect(() => {
+    setPage(1);
+  }, [debounced, setPage]);
 
   return (
     <div>
@@ -48,6 +53,7 @@ function CustomersInner() {
         ) : !data || data.length === 0 ? (
           <EmptyState title="No customers found" description="Customers appear here once orders are placed." />
         ) : (
+          <>
           <Table>
             <THead>
               <tr>
@@ -59,7 +65,7 @@ function CustomersInner() {
               </tr>
             </THead>
             <TBody>
-              {data.map((c) => (
+              {pageRows.map((c) => (
                 <Tr key={c.email} clickable onClick={() => router.push(`/customers/${encodeURIComponent(c.email)}`)}>
                   <Td>
                     <div className="flex items-center gap-3">
@@ -78,6 +84,8 @@ function CustomersInner() {
               ))}
             </TBody>
           </Table>
+          <Pagination page={page} pageSize={20} total={total} onPageChange={setPage} />
+          </>
         )}
       </Card>
     </div>

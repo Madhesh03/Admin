@@ -2,12 +2,13 @@
 
 import { listRefunds } from "@/lib/admin-api";
 import { titleCase, type Refund } from "@/lib/types";
-import { useAsync } from "@/lib/use-async";
+import { useAsync, usePagination } from "@/lib/use-async";
 import { formatDateTime, formatPrice } from "@/lib/utils";
 import { RequirePermission } from "@/components/permission-gate";
 import { PageHeader } from "@/components/layout/page-header";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Pagination } from "@/components/ui/pagination";
 import { EmptyState, ErrorState, TableSkeleton } from "@/components/ui/states";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 
@@ -27,6 +28,7 @@ export default function RefundsPage() {
 
 function Inner() {
   const { data, loading, error, reload } = useAsync<Refund[]>(() => listRefunds(), []);
+  const { page, setPage, pageRows, total } = usePagination(data ?? [], 20);
 
   return (
     <div>
@@ -39,10 +41,11 @@ function Inner() {
         ) : !data || data.length === 0 ? (
           <EmptyState title="No refunds yet" description="Refunds appear here once issued from an order." />
         ) : (
+          <>
           <Table>
             <THead><tr><Th>Refund</Th><Th>Reason</Th><Th>When</Th><Th className="text-right">Amount</Th><Th>Status</Th></tr></THead>
             <TBody>
-              {data.map((r) => (
+              {pageRows.map((r) => (
                 <Tr key={r.id}>
                   <Td className="font-mono text-xs text-ink">{r.razorpay_refund_id}</Td>
                   <Td className="text-muted">{r.reason || "—"}</Td>
@@ -53,6 +56,8 @@ function Inner() {
               ))}
             </TBody>
           </Table>
+          <Pagination page={page} pageSize={20} total={total} onPageChange={setPage} />
+          </>
         )}
       </Card>
     </div>

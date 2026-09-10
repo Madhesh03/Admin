@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Field, Input, NativeSelect, Textarea } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/states";
 import { toast } from "@/components/ui/toast";
+import { SupplierDialog } from "@/components/suppliers/supplier-dialog";
 
 interface Line { product_id: string; size: string; qty_ordered: string; unit_cost: string }
 
@@ -54,6 +55,15 @@ function Inner() {
   const [notes, setNotes] = React.useState("");
   const [lines, setLines] = React.useState<Line[]>([{ product_id: "", size: "", qty_ordered: "1", unit_cost: "" }]);
   const [busy, setBusy] = React.useState(false);
+  const [addingSupplier, setAddingSupplier] = React.useState(false);
+
+  function onSupplierAdded(saved: Supplier) {
+    // Update the list in place — no round-trip needed, we already have the
+    // full row back from the create call.
+    suppliers.setData((prev) => [...(prev ?? []), saved]);
+    setSupplierId(saved.id);
+    setAddingSupplier(false);
+  }
 
   const productList: ProductList[] = products.data?.items ?? [];
   const productById = React.useMemo(
@@ -118,7 +128,13 @@ function Inner() {
       <PageHeader title="New purchase order" description="Draft a PO, then confirm to send it to the supplier." backHref="/purchase-orders" />
 
       {suppliers.data && suppliers.data.length === 0 ? (
-        <Card><EmptyState title="No active suppliers" description="Add a supplier first." /></Card>
+        <Card>
+          <EmptyState
+            title="No active suppliers"
+            description="You need at least one supplier before you can raise a purchase order."
+            action={<Button onClick={() => setAddingSupplier(true)}><Plus className="size-4" />Add supplier</Button>}
+          />
+        </Card>
       ) : (
         <div className="grid gap-6 lg:grid-cols-3">
           <div className="space-y-6 lg:col-span-2">
@@ -158,10 +174,15 @@ function Inner() {
               <CardHeader><CardTitle>Details</CardTitle></CardHeader>
               <CardBody className="space-y-4">
                 <Field label="Supplier" required>
-                  <NativeSelect value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
-                    <option value="">Select…</option>
-                    {(suppliers.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </NativeSelect>
+                  <div className="flex gap-2">
+                    <NativeSelect value={supplierId} onChange={(e) => setSupplierId(e.target.value)} className="flex-1">
+                      <option value="">Select…</option>
+                      {(suppliers.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </NativeSelect>
+                    <Button type="button" variant="secondary" size="icon" title="Add a new supplier" onClick={() => setAddingSupplier(true)}>
+                      <Plus className="size-4" />
+                    </Button>
+                  </div>
                 </Field>
                 <div className="grid grid-cols-2 gap-3">
                   <Field label="Order date"><Input type="date" value={orderDate} onChange={(e) => setOrderDate(e.target.value)} /></Field>
@@ -188,6 +209,14 @@ function Inner() {
             </div>
           </div>
         </div>
+      )}
+
+      {addingSupplier && (
+        <SupplierDialog
+          supplier={null}
+          onClose={() => setAddingSupplier(false)}
+          onSaved={onSupplierAdded}
+        />
       )}
     </div>
   );

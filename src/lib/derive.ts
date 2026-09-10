@@ -261,7 +261,7 @@ export function detailPrimaryKey(p: ProductDetail): string | undefined {
 
 /** low / out / healthy classification for a stock quantity + threshold. */
 export type StockLevel = "out" | "low" | "healthy";
-export function stockLevel(qty: number, threshold = 5): StockLevel {
+export function stockLevel(qty: number, threshold = 1): StockLevel {
   if (qty <= 0) return "out";
   if (qty <= threshold) return "low";
   return "healthy";

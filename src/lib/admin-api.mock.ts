@@ -1272,7 +1272,7 @@ function appendLedger(entry: Omit<StockLedgerEntry, "id">): void {
 }
 
 export async function listLowStock(
-  threshold = 5,
+  threshold = 1,
 ): Promise<{ items: ProductList[]; threshold: number; count: number }> {
   await tick();
   requirePermission("inventory.view_stock_ledger");

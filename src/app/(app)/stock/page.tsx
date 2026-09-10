@@ -173,7 +173,7 @@ function LevelsTab({
 }
 
 function LowTab({ onAdjust, refreshKey }: { onAdjust?: (p: ProductList) => void; refreshKey: number }) {
-  const [threshold, setThreshold] = React.useState(5);
+  const [threshold, setThreshold] = React.useState(1);
   const { data, loading, error, reload } = useAsync(() => listLowStock(threshold), [threshold, refreshKey]);
   const { page, setPage, pageRows, total } = usePagination(data?.items ?? [], 20);
   React.useEffect(() => {

@@ -309,7 +309,7 @@ export function receivePurchaseOrder(
 /* -------------------------------------------------------------------------- */
 
 export async function listLowStock(
-  threshold = 5,
+  threshold = 1,
 ): Promise<{ items: ProductList[]; threshold: number; count: number }> {
   const env = await apiGetEnvelope<ProductList[]>("/inventory/stock/low/", {
     threshold,

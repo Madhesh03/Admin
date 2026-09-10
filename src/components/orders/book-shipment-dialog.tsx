@@ -8,7 +8,6 @@ import { cn, formatPrice } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import { toast } from "@/components/ui/toast";
@@ -40,7 +39,8 @@ export function BookShipmentDialog({
   const [length, setLength] = React.useState(DEFAULTS.length);
   const [breadth, setBreadth] = React.useState(DEFAULTS.breadth);
   const [height, setHeight] = React.useState(DEFAULTS.height);
-  const [cod, setCod] = React.useState(false);
+  // COD is not supported yet — always book prepaid.
+  const cod = false;
 
   const [rates, setRates] = React.useState<CourierRate[] | null>(null);
   const [selected, setSelected] = React.useState<string>("");
@@ -54,7 +54,6 @@ export function BookShipmentDialog({
     setLength(DEFAULTS.length);
     setBreadth(DEFAULTS.breadth);
     setHeight(DEFAULTS.height);
-    setCod(false);
     setRates(null);
     setSelected("");
     setRatesError(null);
@@ -158,7 +157,7 @@ export function BookShipmentDialog({
               </Field>
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-surface px-3 py-2.5">
+            <div className="rounded-lg bg-surface px-3 py-2.5">
               <p className="text-xs text-muted">
                 Billable weight{" "}
                 <span className="font-semibold text-ink">{billable.toFixed(2)} kg</span>
@@ -166,10 +165,6 @@ export function BookShipmentDialog({
                   <span className="text-faint"> · volumetric ({volumetric.toFixed(2)} kg) exceeds actual</span>
                 )}
               </p>
-              <label className="flex items-center gap-2 text-xs font-medium text-ink">
-                <Switch checked={cod} onCheckedChange={setCod} />
-                Cash on delivery
-              </label>
             </div>
 
             <Button

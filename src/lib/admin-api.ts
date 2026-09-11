@@ -82,6 +82,7 @@ export const archiveProduct = USE_MOCKS ? mock.archiveProduct : real.archiveProd
 export const presignMedia = USE_MOCKS ? mock.presignMedia : real.presignMedia;
 export const confirmMedia = USE_MOCKS ? mock.confirmMedia : real.confirmMedia;
 export const deleteMedia = USE_MOCKS ? mock.deleteMedia : real.deleteMedia;
+export const setMediaFlag = USE_MOCKS ? mock.setMediaFlag : real.setMediaFlag;
 
 /* Categories */
 export const listCategories = USE_MOCKS ? mock.listCategories : real.listCategories;

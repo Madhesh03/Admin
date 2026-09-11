@@ -161,6 +161,10 @@ export function deleteMedia(mediaId: string): Promise<void> {
   return apiDelete(`/catalog/staff/media/${mediaId}/`);
 }
 
+export function setMediaFlag(mediaId: string, flag: "is_primary" | "is_hover"): Promise<ProductMedia> {
+  return apiPatch<ProductMedia>(`/catalog/staff/media/${mediaId}/`, { [flag]: true });
+}
+
 /* -------------------------------------------------------------------------- */
 /* CATEGORIES                                                                  */
 /* -------------------------------------------------------------------------- */

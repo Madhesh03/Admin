@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { Upload, Link2, Trash2, Star, Eye, ImagePlus, ZoomIn, RotateCcw } from "lucide-react";
-import { deleteMedia } from "@/lib/admin-api";
+import { deleteMedia, setMediaFlag } from "@/lib/admin-api";
 import { uploadProductImage, uploadProductImageFromUrl } from "@/lib/media-upload";
 import type { ProductMedia } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -17,10 +17,10 @@ import { cn, mediaUrl, preferStableSrc } from "@/lib/utils";
  * plus delete. Images can be dragged in, browsed, or pasted as a URL, previewed
  * with zoom, and one marked primary and/or a (different) one marked hover — the
  * image swapped in when a shopper hovers the product card on the storefront.
- * Post-upload reorder/set-primary/set-hover has no API endpoint yet, so both
- * are chosen at upload time and deletes auto-promote the next image (primary
- * only — hover has no forced replacement, a product can have none). The upload
- * plumbing lives in `@/lib/media-upload`.
+ * Primary/hover can also be (re)assigned after upload from each thumbnail's
+ * hover overlay. Deletes auto-promote the next image (primary only — hover has
+ * no forced replacement, a product can have none). The upload plumbing lives
+ * in `@/lib/media-upload`.
  */
 export function ProductMediaManager({
   productId,
@@ -125,6 +125,19 @@ export function ProductMediaManager({
     }
   }
 
+  async function makeFlag(m: ProductMedia, flag: "is_primary" | "is_hover") {
+    setBusy(true);
+    try {
+      await setMediaFlag(m.id, flag);
+      toast.success(flag === "is_primary" ? "Set as primary" : "Set as hover image");
+      onChanged();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not update image");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="space-y-3">
       {media.length > 0 && (
@@ -170,6 +183,32 @@ export function ProductMediaManager({
                     <ZoomIn className="size-3.5" />
                   </button>
                 </div>
+                {!marked && (
+                  <div className="flex justify-center gap-1">
+                    {!m.is_primary && (
+                      <button
+                        type="button"
+                        title="Set as primary"
+                        disabled={busy}
+                        onClick={() => makeFlag(m, "is_primary")}
+                        className="rounded bg-white/90 p-1 text-ink hover:bg-white hover:text-forest"
+                      >
+                        <Star className="size-3.5" />
+                      </button>
+                    )}
+                    {!m.is_hover && (
+                      <button
+                        type="button"
+                        title="Set as hover image"
+                        disabled={busy}
+                        onClick={() => makeFlag(m, "is_hover")}
+                        className="rounded bg-white/90 p-1 text-ink hover:bg-white hover:text-amber-500"
+                      >
+                        <Eye className="size-3.5" />
+                      </button>
+                    )}
+                  </div>
+                )}
                 <div className="flex justify-end">
                   <button
                     type="button"

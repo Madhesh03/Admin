@@ -768,6 +768,24 @@ export async function confirmMedia(
   return clone(media);
 }
 
+export async function setMediaFlag(
+  mediaId: string,
+  flag: "is_primary" | "is_hover",
+): Promise<ProductMedia> {
+  await tick(true);
+  requirePermission("catalog.edit_product");
+  const products = get("products");
+  const owner = products.find((p) => p.media.some((m) => m.id === mediaId));
+  if (!owner) throw new ApiError("Media not found", 404);
+  const nextMedia = owner.media.map((m) =>
+    m.id === mediaId
+      ? { ...m, [flag]: true, ...(flag === "is_primary" ? { is_hover: false } : { is_primary: false }) }
+      : { ...m, [flag]: false },
+  );
+  writeProduct({ ...owner, media: nextMedia, updated_at: new Date().toISOString() });
+  return clone(nextMedia.find((m) => m.id === mediaId)!);
+}
+
 export async function deleteMedia(mediaId: string): Promise<void> {
   await tick(true);
   requirePermission("catalog.edit_product");

@@ -132,6 +132,16 @@ export function ProductForm({
   onSaved?: () => void;
 }) {
   const router = useRouter();
+  // Prefer returning via history over a fixed push to "/products" — the list's
+  // filters/page live in its URL, and only going *back* to that entry restores
+  // them instead of landing on the bare, filter-less URL.
+  function backToList() {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.back();
+    } else {
+      router.push("/products");
+    }
+  }
   const isEdit = !!product;
   const [form, setForm] = React.useState<FormState>(() => toState(product));
   const [errors, setErrors] = React.useState<Errors>({});
@@ -323,7 +333,7 @@ export function ProductForm({
         } else {
           toast.success(`"${created.name}" created as draft — add images and publish`);
         }
-        router.push("/products");
+        backToList();
       }
     } catch (err) {
       // Surface a server-side duplicate-name error inline on the field.
@@ -691,7 +701,7 @@ export function ProductForm({
           <Button type="submit" loading={saving}>
             <Save className="size-4" />{isEdit ? "Save changes" : "Create product"}
           </Button>
-          <Button type="button" variant="secondary" onClick={() => router.push("/products")}>Cancel</Button>
+          <Button type="button" variant="secondary" onClick={backToList}>Cancel</Button>
         </div>
       </div>
 

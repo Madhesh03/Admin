@@ -164,7 +164,7 @@ function LevelsTab({
           <div className="flex items-center gap-2">
             <Button size="sm" onClick={() => setBulkOpen(true)}>
               <SlidersHorizontal className="size-4" />
-              Bulk adjust stock
+              Bulk set stock
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
               <X className="size-4" />
@@ -272,37 +272,43 @@ function BulkAdjustDialog({
   products: ProductList[];
   onDone: () => void;
 }) {
-  const [delta, setDelta] = React.useState("");
+  const [qty, setQty] = React.useState("");
   const [note, setNote] = React.useState("");
   const [error, setError] = React.useState<string | undefined>();
   const [busy, setBusy] = React.useState(false);
 
   React.useEffect(() => {
-    if (open) { setDelta(""); setNote(""); setError(undefined); }
+    if (open) { setQty(""); setNote(""); setError(undefined); }
   }, [open]);
 
   async function submit() {
-    const n = Number(delta);
-    if (!Number.isInteger(n) || n === 0) {
-      setError("Enter a non-zero whole number, e.g. 5 or -3");
+    const n = Number(qty);
+    if (!Number.isInteger(n) || n < 0) {
+      setError("Enter a whole number, 0 or more");
       return;
     }
     setError(undefined);
     setBusy(true);
     let failed = 0;
+    let skipped = 0;
     for (const p of products) {
-      const newQty = Math.max(0, p.qty + n);
+      // Already at the target — adjustStock rejects a same-value "change",
+      // so leave it alone instead of counting it as a failure.
+      if (p.qty === n) { skipped++; continue; }
       try {
-        await adjustStock(p.id, newQty, note.trim());
+        await adjustStock(p.id, n, note.trim());
       } catch {
         failed++;
       }
     }
     setBusy(false);
+    const changed = products.length - skipped;
     if (failed) {
-      toast.error(`${failed} of ${products.length} product${products.length > 1 ? "s" : ""} failed to update`);
+      toast.error(`${failed} of ${changed} product${changed > 1 ? "s" : ""} failed to update`);
+    } else if (changed === 0) {
+      toast.success("Already at that quantity — nothing to change");
     } else {
-      toast.success(`Adjusted stock for ${products.length} product${products.length > 1 ? "s" : ""}`);
+      toast.success(`Set stock to ${n} for ${changed} product${changed > 1 ? "s" : ""}`);
     }
     onDone();
     onClose();
@@ -312,19 +318,19 @@ function BulkAdjustDialog({
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       {open && (
         <DialogContent
-          title="Bulk adjust stock"
-          description={`${products.length} product${products.length > 1 ? "s" : ""} selected — quantity changes by the same amount for each`}
+          title="Bulk set stock"
+          description={`${products.length} product${products.length > 1 ? "s" : ""} selected — quantity is set to the same value for each`}
         >
           <div className="space-y-4">
-            <Field label="Adjust by" htmlFor="bulk-delta" required error={error} hint="Positive to add stock, negative to remove — e.g. 5 or -3">
-              <Input id="bulk-delta" inputMode="numeric" value={delta} invalid={!!error} onChange={(e) => setDelta(e.target.value)} placeholder="e.g. 5" />
+            <Field label="New quantity" htmlFor="bulk-qty" required error={error} hint="Every selected product's stock is set to this exact value">
+              <Input id="bulk-qty" inputMode="numeric" value={qty} invalid={!!error} onChange={(e) => setQty(e.target.value)} placeholder="e.g. 0" />
             </Field>
             <Field label="Reason / note" htmlFor="bulk-note" hint="Optional — recorded in the stock ledger for each product">
-              <Input id="bulk-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Restock from supplier" />
+              <Input id="bulk-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Recount after audit" />
             </Field>
             <div className="flex justify-end gap-2">
               <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
-              <Button size="sm" loading={busy} onClick={submit}>Save adjustment</Button>
+              <Button size="sm" loading={busy} onClick={submit}>Save</Button>
             </div>
           </div>
         </DialogContent>
@@ -382,7 +388,7 @@ function LowTab({ onAdjust, refreshKey }: { onAdjust?: (p: ProductList) => void;
           <div className="flex items-center gap-2">
             <Button size="sm" onClick={() => setBulkOpen(true)}>
               <SlidersHorizontal className="size-4" />
-              Bulk adjust stock
+              Bulk set stock
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
               <X className="size-4" />

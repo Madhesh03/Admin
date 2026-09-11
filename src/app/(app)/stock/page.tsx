@@ -132,15 +132,20 @@ function LevelsTab({
   function toggleAll(on: boolean) {
     setSelected((prev) => {
       const next = new Set(prev);
+      // Sized products (rings, etc.) track stock per size — the whole-product
+      // qty here is just a denormalized sum, so bulk-setting it directly would
+      // desync it from the per-size rows. Adjust those on the product page.
       for (const p of rows) {
+        if (p.has_sizes) continue;
         if (on) next.add(p.id);
         else next.delete(p.id);
       }
       return next;
     });
   }
+  const selectableRows = rows.filter((p) => !p.has_sizes);
   const selectedProducts = rows.filter((p) => selected.has(p.id));
-  const allSelected = rows.length > 0 && selectedProducts.length === rows.length;
+  const allSelected = selectableRows.length > 0 && selectedProducts.length === selectableRows.length;
   const someSelected = selectedProducts.length > 0 && !allSelected;
 
   return (
@@ -214,8 +219,10 @@ function LevelsTab({
                       <input
                         type="checkbox"
                         aria-label={`Select ${p.name}`}
-                        className="size-4 cursor-pointer accent-forest align-middle"
+                        className="size-4 cursor-pointer accent-forest align-middle disabled:cursor-not-allowed disabled:opacity-30"
                         checked={selected.has(p.id)}
+                        disabled={p.has_sizes}
+                        title={p.has_sizes ? "Sized product — adjust stock per size on its product page" : undefined}
                         onChange={(e) => toggleOne(p.id, e.target.checked)}
                       />
                     </Td>
@@ -234,7 +241,15 @@ function LevelsTab({
                   <Td>
                     <div className="flex justify-end gap-1.5">
                       <Button variant="ghost" size="sm" onClick={() => onLedger(p)}><History className="size-4" />Ledger</Button>
-                      {canAdjust && <Button variant="secondary" size="sm" onClick={() => onAdjust(p)}><SlidersHorizontal className="size-4" />Adjust</Button>}
+                      {canAdjust && (
+                        p.has_sizes ? (
+                          <Button variant="secondary" size="sm" asChild>
+                            <Link href={`/products/${p.id}`}>Per size →</Link>
+                          </Button>
+                        ) : (
+                          <Button variant="secondary" size="sm" onClick={() => onAdjust(p)}><SlidersHorizontal className="size-4" />Adjust</Button>
+                        )
+                      )}
                     </div>
                   </Td>
                 </Tr>
@@ -292,6 +307,10 @@ function BulkAdjustDialog({
     let failed = 0;
     let skipped = 0;
     for (const p of products) {
+      // Sized products can't be set here — the backend rejects a whole-product
+      // qty change for them (it must go through a specific size). The
+      // selection UI already excludes them; this is just a backstop.
+      if (p.has_sizes) { skipped++; continue; }
       // Already at the target — adjustStock rejects a same-value "change",
       // so leave it alone instead of counting it as a failure.
       if (p.qty === n) { skipped++; continue; }
@@ -363,15 +382,20 @@ function LowTab({ onAdjust, refreshKey }: { onAdjust?: (p: ProductList) => void;
   function toggleAll(on: boolean) {
     setSelected((prev) => {
       const next = new Set(prev);
+      // Sized products track stock per size — bulk-setting the whole-product
+      // qty would desync it from the per-size rows. Adjust those on the
+      // product page instead.
       for (const p of pageRows) {
+        if (p.has_sizes) continue;
         if (on) next.add(p.id);
         else next.delete(p.id);
       }
       return next;
     });
   }
+  const selectableRows = pageRows.filter((p) => !p.has_sizes);
   const selectedProducts = pageRows.filter((p) => selected.has(p.id));
-  const allSelected = pageRows.length > 0 && selectedProducts.length === pageRows.length;
+  const allSelected = selectableRows.length > 0 && selectedProducts.length === selectableRows.length;
   const someSelected = selectedProducts.length > 0 && !allSelected;
 
   return (
@@ -435,8 +459,10 @@ function LowTab({ onAdjust, refreshKey }: { onAdjust?: (p: ProductList) => void;
                       <input
                         type="checkbox"
                         aria-label={`Select ${p.name}`}
-                        className="size-4 cursor-pointer accent-forest align-middle"
+                        className="size-4 cursor-pointer accent-forest align-middle disabled:cursor-not-allowed disabled:opacity-30"
                         checked={selected.has(p.id)}
+                        disabled={p.has_sizes}
+                        title={p.has_sizes ? "Sized product — adjust stock per size on its product page" : undefined}
                         onChange={(e) => toggleOne(p.id, e.target.checked)}
                       />
                     </Td>
@@ -447,7 +473,17 @@ function LowTab({ onAdjust, refreshKey }: { onAdjust?: (p: ProductList) => void;
                   </Td>
                   <Td><StockBadge level={stockLevel(p.qty)} /></Td>
                   <Td className="text-right"><span className={cn("font-bold", STOCK_TEXT[stockLevel(p.qty)])}>{p.qty}</span></Td>
-                  {onAdjust && <Td className="text-right"><Button variant="secondary" size="sm" onClick={() => onAdjust(p)}>Adjust</Button></Td>}
+                  {onAdjust && (
+                    <Td className="text-right">
+                      {p.has_sizes ? (
+                        <Button variant="secondary" size="sm" asChild>
+                          <Link href={`/products/${p.id}`}>Per size →</Link>
+                        </Button>
+                      ) : (
+                        <Button variant="secondary" size="sm" onClick={() => onAdjust(p)}>Adjust</Button>
+                      )}
+                    </Td>
+                  )}
                 </Tr>
               ))}
             </TBody>

@@ -2,9 +2,9 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { Plus, Trash2, Save, Boxes } from "lucide-react";
 import {
+  adjustStock,
   checkProductName,
   createProduct,
   deleteMedia,
@@ -16,7 +16,7 @@ import {
 import { ApiError } from "@/lib/http";
 import { uploadProductImage } from "@/lib/media-upload";
 import { effectivePrice, nameCode, skuStem, variationSku } from "@/lib/derive";
-import { productFormSchema } from "@/lib/schemas";
+import { adjustStockSchema, productFormSchema } from "@/lib/schemas";
 import {
   DIMENSION_UNITS,
   METAL_LABEL,
@@ -35,6 +35,7 @@ import { useAsync } from "@/lib/use-async";
 import { formatPrice } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input, NativeSelect, Textarea, Label } from "@/components/ui/input";
 import { ToggleField } from "@/components/ui/switch";
 import { toast } from "@/components/ui/toast";
@@ -139,6 +140,9 @@ export function ProductForm({
   const [pending, setPending] = React.useState<PendingImage[]>([]);
   // Existing media (edit mode) marked for deletion — removed on save.
   const [removedMedia, setRemovedMedia] = React.useState<Set<string>>(new Set());
+  // Inline "Adjust stock" dialog, for non-sized products (sized products use
+  // the ProductSizeStock card below instead).
+  const [adjustOpen, setAdjustOpen] = React.useState(false);
 
   const cats = useAsync<Category[]>(() => listCategories(), []);
   const cols = useAsync<Collection[]>(() => listCollections(), []);
@@ -302,8 +306,11 @@ export function ProductForm({
         } else {
           toast.success("Product updated");
         }
+        // Stay on the edit page and refresh in place — e.g. a newly added
+        // variation's size-stock row (created with qty 0 by the backend)
+        // needs to actually be visible here so staff can set its stock
+        // right away, instead of being sent back to the product list first.
         onSaved?.();
-        router.push("/products");
       } else {
         const created = await createProduct(buildPayload());
         if (pending.length) {
@@ -614,7 +621,14 @@ export function ProductForm({
                 }
               />
             )}
-            <PendingImagePicker value={pending} onChange={setPending} disabled={saving} />
+            <PendingImagePicker
+              value={pending}
+              onChange={setPending}
+              disabled={saving}
+              hasExistingPrimary={
+                isEdit && (product!.media ?? []).some((m) => m.is_primary && !removedMedia.has(m.id))
+              }
+            />
           </CardBody>
         </Card>
       </div>
@@ -641,15 +655,21 @@ export function ProductForm({
                     {(["draft", "active", "out_of_stock", "archived"] as ProductStatus[]).map((s) => <option key={s} value={s}>{titleCase(s)}</option>)}
                   </NativeSelect>
                 </Field>
-                <div className="rounded-lg border border-line bg-surface p-3 text-sm">
-                  <p className="font-semibold text-ink">Stock: {product!.qty}</p>
-                  <p className="mt-0.5 text-xs text-muted">
-                    Quantity is managed through the stock ledger, not here.
-                  </p>
-                  <Link href="/stock" className="mt-1.5 inline-flex items-center gap-1 text-xs font-semibold text-forest hover:underline">
-                    <Boxes className="size-3.5" />Adjust stock
-                  </Link>
-                </div>
+                {!product!.has_sizes && (
+                  <div className="rounded-lg border border-line bg-surface p-3 text-sm">
+                    <p className="font-semibold text-ink">Stock: {product!.qty}</p>
+                    <p className="mt-0.5 text-xs text-muted">
+                      Quantity is managed through the stock ledger.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setAdjustOpen(true)}
+                      className="mt-1.5 inline-flex items-center gap-1 text-xs font-semibold text-forest hover:underline"
+                    >
+                      <Boxes className="size-3.5" />Adjust stock
+                    </button>
+                  </div>
+                )}
               </>
             ) : (
               <p className="rounded-lg border border-dashed border-line-strong p-3 text-sm text-muted">
@@ -674,7 +694,82 @@ export function ProductForm({
           <Button type="button" variant="secondary" onClick={() => router.push("/products")}>Cancel</Button>
         </div>
       </div>
+
+      {isEdit && (
+        <AdjustStockDialog
+          open={adjustOpen}
+          onClose={() => setAdjustOpen(false)}
+          productId={product!.id}
+          productName={product!.name}
+          qty={product!.qty}
+          onDone={() => onSaved?.()}
+        />
+      )}
     </form>
+  );
+}
+
+function AdjustStockDialog({
+  open,
+  onClose,
+  productId,
+  productName,
+  qty,
+  onDone,
+}: {
+  open: boolean;
+  onClose: () => void;
+  productId: string;
+  productName: string;
+  qty: number;
+  onDone: () => void;
+}) {
+  const [newQty, setNewQty] = React.useState("");
+  const [note, setNote] = React.useState("");
+  const [errors, setErrors] = React.useState<{ new_qty?: string; note?: string }>({});
+  const [busy, setBusy] = React.useState(false);
+
+  React.useEffect(() => {
+    if (open) { setNewQty(String(qty)); setNote(""); setErrors({}); }
+  }, [open, qty]);
+
+  async function submit() {
+    const parsed = adjustStockSchema.safeParse({ new_qty: newQty, note });
+    if (!parsed.success) {
+      const f = parsed.error.flatten().fieldErrors;
+      setErrors({ new_qty: f.new_qty?.[0], note: f.note?.[0] });
+      return;
+    }
+    setBusy(true);
+    try {
+      await adjustStock(productId, parsed.data.new_qty, parsed.data.note);
+      toast.success("Stock adjusted");
+      onDone();
+      onClose();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not adjust");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent title="Adjust stock" description={`${productName} · current ${qty}`}>
+        <div className="space-y-4">
+          <Field label="New quantity" htmlFor="adjust-qty" required error={errors.new_qty}>
+            <Input id="adjust-qty" inputMode="numeric" value={newQty} invalid={!!errors.new_qty} onChange={(e) => setNewQty(e.target.value)} />
+          </Field>
+          <Field label="Reason / note" htmlFor="adjust-note" error={errors.note} hint="Optional — recorded in the stock ledger">
+            <Input id="adjust-note" value={note} invalid={!!errors.note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Recount after audit" />
+          </Field>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
+            <Button size="sm" loading={busy} onClick={submit}>Save adjustment</Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

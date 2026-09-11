@@ -67,10 +67,6 @@ export function ProductSizeStock({
       setErrors({ qty: "Whole units, 0 or more" });
       return;
     }
-    if (!note.trim()) {
-      setErrors({ note: "A note is required" });
-      return;
-    }
     setErrors({});
     setBusy(true);
     let failed = 0;

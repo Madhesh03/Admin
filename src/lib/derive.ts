@@ -27,10 +27,15 @@ export function slugify(name: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-/** effective_price = price × (1 − discount_percent/100), rounded to rupees. */
+/**
+ * effective_price = price × (1 − discount_percent/100), rounded to paise (2dp) —
+ * matching the backend's exact Decimal arithmetic (apps/catalog/models.py
+ * Product.effective_price) so the admin preview never disagrees with what's
+ * actually stored and shown on the storefront.
+ */
 export function effectivePrice(price: number, discountPercent: number): number {
   const pct = Math.max(0, Math.min(100, discountPercent || 0));
-  return Math.round(price * (1 - pct / 100));
+  return Math.round(price * (1 - pct / 100) * 100) / 100;
 }
 
 /** is_in_stock derives from qty > 0. */

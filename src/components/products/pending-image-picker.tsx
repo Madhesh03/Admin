@@ -37,10 +37,14 @@ export function PendingImagePicker({
   value,
   onChange,
   disabled,
+  hasExistingPrimary = false,
 }: {
   value: PendingImage[];
   onChange: (next: PendingImage[]) => void;
   disabled?: boolean;
+  /** Whether the product already has a primary image among its saved media —
+   * when true, newly added images should never auto-claim primary. */
+  hasExistingPrimary?: boolean;
 }) {
   const fileRef = React.useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = React.useState(false);
@@ -56,7 +60,7 @@ export function PendingImagePicker({
   function addFiles(files: FileList | null) {
     const images = Array.from(files ?? []).filter((f) => f.type.startsWith("image/"));
     if (!images.length) return;
-    const hasPrimary = value.some((p) => p.isPrimary);
+    const hasPrimary = hasExistingPrimary || value.some((p) => p.isPrimary);
     const additions = images.map((f, i) => toPending(f, !hasPrimary && i === 0));
     onChange([...value, ...additions]);
   }
@@ -65,9 +69,9 @@ export function PendingImagePicker({
     const target = value.find((p) => p.id === id);
     if (target) URL.revokeObjectURL(target.url);
     let next = value.filter((p) => p.id !== id);
-    // Promote a new primary if we removed the current one. Hover has no
-    // forced replacement — a product can validly have none.
-    if (target?.isPrimary && next.length && !next.some((p) => p.isPrimary)) {
+    // Promote a new primary if we removed the current one — but only when
+    // there's no existing saved media to fall back on as primary already.
+    if (target?.isPrimary && next.length && !next.some((p) => p.isPrimary) && !hasExistingPrimary) {
       next = next.map((p, i) => (i === 0 ? { ...p, isPrimary: true } : p));
     }
     onChange(next);

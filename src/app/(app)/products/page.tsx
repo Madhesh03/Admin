@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Plus, Search, MoreHorizontal, Pencil, Archive, Star, X, SlidersHorizontal } from "lucide-react";
 import {
   archiveProduct,
@@ -50,27 +50,60 @@ const PAGE_SIZE = 20;
 export default function ProductsPage() {
   return (
     <RequirePermission perm="catalog.view_product">
-      <ProductsInner />
+      <React.Suspense fallback={<TableSkeleton rows={7} cols={6} />}>
+        <ProductsInner />
+      </React.Suspense>
     </RequirePermission>
   );
 }
 
 function ProductsInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { can } = useAuth();
-  const [q, setQ] = React.useState("");
-  const [category, setCategory] = React.useState<string>("all");
-  const [metal, setMetal] = React.useState<ListProductsParams["metal_type"]>("all");
-  const [status, setStatus] = React.useState<ListProductsParams["status"]>("all");
-  const [ordering, setOrdering] = React.useState("-created_at");
-  const [page, setPage] = React.useState(1);
+
+  // Filters live in the URL so that navigating away to edit a product and
+  // back (browser back, or the edit form's own "Cancel"/save redirect)
+  // restores the exact same filtered view instead of resetting to defaults.
+  const [q, setQ] = React.useState(() => searchParams.get("q") ?? "");
+  const [category, setCategory] = React.useState<string>(() => searchParams.get("category") ?? "all");
+  const [metal, setMetal] = React.useState<ListProductsParams["metal_type"]>(
+    () => (searchParams.get("metal") as ListProductsParams["metal_type"]) ?? "all",
+  );
+  const [status, setStatus] = React.useState<ListProductsParams["status"]>(
+    () => (searchParams.get("status") as ListProductsParams["status"]) ?? "all",
+  );
+  const [ordering, setOrdering] = React.useState(() => searchParams.get("ordering") ?? "-created_at");
+  const [page, setPage] = React.useState(() => Number(searchParams.get("page")) || 1);
   const debounced = useDebouncedValue(q);
 
   // Any change to what's being asked for invalidates the current page number —
-  // page 3 of the old result set is meaningless against the new one.
+  // page 3 of the old result set is meaningless against the new one. Skip
+  // this on the very first render so a page restored from the URL (e.g. page 3
+  // via browser back) isn't immediately reset to 1.
+  const firstRun = React.useRef(true);
   React.useEffect(() => {
+    if (firstRun.current) {
+      firstRun.current = false;
+      return;
+    }
     setPage(1);
   }, [debounced, category, metal, status, ordering]);
+
+  // Keep the URL in sync with the current filters (replace, not push, so
+  // typing in the search box doesn't spam browser history).
+  React.useEffect(() => {
+    const params = new URLSearchParams();
+    if (debounced) params.set("q", debounced);
+    if (category !== "all") params.set("category", category);
+    if (metal && metal !== "all") params.set("metal", metal);
+    if (status && status !== "all") params.set("status", status);
+    if (ordering !== "-created_at") params.set("ordering", ordering);
+    if (page !== 1) params.set("page", String(page));
+    const qs = params.toString();
+    router.replace(qs ? `/products?${qs}` : "/products", { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debounced, category, metal, status, ordering, page]);
 
   const cats = useAsync<Category[]>(() => listCategories(), []);
   const cols = useAsync<Collection[]>(() => listCollections(), []);

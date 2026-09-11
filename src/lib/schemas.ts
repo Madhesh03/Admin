@@ -91,7 +91,7 @@ export const supplierSchema = z.object({
 
 export const adjustStockSchema = z.object({
   new_qty: z.coerce.number({ message: "Enter a number" }).int("Whole units").min(0, "Can't be negative"),
-  note: z.string().trim().min(1, "A note is required"),
+  note: z.string().trim().default(""),
 });
 
 export const refundSchema = z.object({

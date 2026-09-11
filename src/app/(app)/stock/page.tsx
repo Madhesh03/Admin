@@ -2,9 +2,10 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Search, SlidersHorizontal, History } from "lucide-react";
+import { Search, SlidersHorizontal, History, X } from "lucide-react";
 import {
   adjustStock,
+  listCategories,
   listLowStock,
   listProducts,
   productLedger,
@@ -12,7 +13,7 @@ import {
 } from "@/lib/admin-api";
 import { stockLevel } from "@/lib/derive";
 import { adjustStockSchema } from "@/lib/schemas";
-import { METAL_LABEL, titleCase, type ProductList, type StockLedgerEntry } from "@/lib/types";
+import { type Category, METAL_LABEL, titleCase, type ProductList, type StockLedgerEntry } from "@/lib/types";
 import { useAsync, useDebouncedValue, usePagination } from "@/lib/use-async";
 import { cn, formatDateTime, formatPrice, preferStableSrc } from "@/lib/utils";
 import { useAuth } from "@/components/auth-provider";
@@ -20,7 +21,7 @@ import { RequirePermission } from "@/components/permission-gate";
 import { PageHeader } from "@/components/layout/page-header";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Field, Input } from "@/components/ui/input";
+import { Field, Input, NativeSelect } from "@/components/ui/input";
 import { StockBadge } from "@/components/ui/badge";
 import { Pagination } from "@/components/ui/pagination";
 import { Thumb } from "@/components/ui/thumb";
@@ -102,26 +103,77 @@ function LevelsTab({
   refreshKey: number;
 }) {
   const [q, setQ] = React.useState("");
+  const [category, setCategory] = React.useState<string>("all");
   const [page, setPage] = React.useState(1);
   const debounced = useDebouncedValue(q);
+  const cats = useAsync<Category[]>(() => listCategories(), []);
   React.useEffect(() => {
     setPage(1);
-  }, [debounced]);
+  }, [debounced, category]);
   const { data, loading, error, reload } = useAsync(
-    () => listProducts({ q: debounced, ordering: "name", page, page_size: STOCK_PAGE_SIZE }),
-    [debounced, refreshKey, page],
+    () => listProducts({ q: debounced, category, ordering: "name", page, page_size: STOCK_PAGE_SIZE }),
+    [debounced, category, refreshKey, page],
   );
   const rows = data?.items ?? [];
   const total = data?.meta.total ?? 0;
 
+  // Bulk selection, scoped to products visible on the current page (mirrors
+  // the Products list page's bulk-edit pattern).
+  const [selected, setSelected] = React.useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = React.useState(false);
+  function toggleOne(id: string, on: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+  function toggleAll(on: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const p of rows) {
+        if (on) next.add(p.id);
+        else next.delete(p.id);
+      }
+      return next;
+    });
+  }
+  const selectedProducts = rows.filter((p) => selected.has(p.id));
+  const allSelected = rows.length > 0 && selectedProducts.length === rows.length;
+  const someSelected = selectedProducts.length > 0 && !allSelected;
+
   return (
     <>
-      <div className="mb-4 max-w-md">
-        <div className="relative">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="relative min-w-[220px] flex-1 max-w-md">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
           <Input className="pl-9" placeholder="Search products…" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
+        <NativeSelect className="w-auto min-w-[130px]" value={category} onChange={(e) => setCategory(e.target.value)}>
+          <option value="all">All categories</option>
+          {(cats.data ?? []).map((c) => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </NativeSelect>
       </div>
+
+      {canAdjust && selectedProducts.length > 0 && (
+        <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-forest/30 bg-forest/5 px-4 py-2.5">
+          <span className="text-sm font-semibold text-ink">{selectedProducts.length} selected</span>
+          <div className="flex items-center gap-2">
+            <Button size="sm" onClick={() => setBulkOpen(true)}>
+              <SlidersHorizontal className="size-4" />
+              Bulk adjust stock
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
+              <X className="size-4" />
+              Clear
+            </Button>
+          </div>
+        </div>
+      )}
+
       <Card>
         {loading ? (
           <TableSkeleton rows={7} cols={4} />
@@ -134,6 +186,20 @@ function LevelsTab({
           <Table>
             <THead>
               <tr>
+                {canAdjust && (
+                  <Th className="w-10">
+                    <input
+                      type="checkbox"
+                      aria-label="Select all"
+                      className="size-4 cursor-pointer accent-forest align-middle"
+                      checked={allSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = someSelected;
+                      }}
+                      onChange={(e) => toggleAll(e.target.checked)}
+                    />
+                  </Th>
+                )}
                 <Th className="w-[45%]">Product</Th>
                 <Th>Availability</Th>
                 <Th className="text-right">Qty</Th>
@@ -143,6 +209,17 @@ function LevelsTab({
             <TBody>
               {rows.map((p) => (
                 <Tr key={p.id}>
+                  {canAdjust && (
+                    <Td onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${p.name}`}
+                        className="size-4 cursor-pointer accent-forest align-middle"
+                        checked={selected.has(p.id)}
+                        onChange={(e) => toggleOne(p.id, e.target.checked)}
+                      />
+                    </Td>
+                  )}
                   <Td>
                     <div className="flex items-center gap-3">
                       <Thumb src={preferStableSrc(p.thumbnail_key, p.thumbnail_url)} alt={p.name} className="size-10 shrink-0" />
@@ -168,7 +245,91 @@ function LevelsTab({
           </>
         )}
       </Card>
+
+      {canAdjust && (
+        <BulkAdjustDialog
+          open={bulkOpen}
+          onClose={() => setBulkOpen(false)}
+          products={selectedProducts}
+          onDone={() => {
+            setSelected(new Set());
+            reload();
+          }}
+        />
+      )}
     </>
+  );
+}
+
+function BulkAdjustDialog({
+  open,
+  onClose,
+  products,
+  onDone,
+}: {
+  open: boolean;
+  onClose: () => void;
+  products: ProductList[];
+  onDone: () => void;
+}) {
+  const [delta, setDelta] = React.useState("");
+  const [note, setNote] = React.useState("");
+  const [error, setError] = React.useState<string | undefined>();
+  const [busy, setBusy] = React.useState(false);
+
+  React.useEffect(() => {
+    if (open) { setDelta(""); setNote(""); setError(undefined); }
+  }, [open]);
+
+  async function submit() {
+    const n = Number(delta);
+    if (!Number.isInteger(n) || n === 0) {
+      setError("Enter a non-zero whole number, e.g. 5 or -3");
+      return;
+    }
+    setError(undefined);
+    setBusy(true);
+    let failed = 0;
+    for (const p of products) {
+      const newQty = Math.max(0, p.qty + n);
+      try {
+        await adjustStock(p.id, newQty, note.trim());
+      } catch {
+        failed++;
+      }
+    }
+    setBusy(false);
+    if (failed) {
+      toast.error(`${failed} of ${products.length} product${products.length > 1 ? "s" : ""} failed to update`);
+    } else {
+      toast.success(`Adjusted stock for ${products.length} product${products.length > 1 ? "s" : ""}`);
+    }
+    onDone();
+    onClose();
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      {open && (
+        <DialogContent
+          title="Bulk adjust stock"
+          description={`${products.length} product${products.length > 1 ? "s" : ""} selected — quantity changes by the same amount for each`}
+        >
+          <div className="space-y-4">
+            <Field label="Adjust by" htmlFor="bulk-delta" required error={error} hint="Positive to add stock, negative to remove — e.g. 5 or -3">
+              <Input id="bulk-delta" inputMode="numeric" value={delta} invalid={!!error} onChange={(e) => setDelta(e.target.value)} placeholder="e.g. 5" />
+            </Field>
+            <Field label="Reason / note" htmlFor="bulk-note" hint="Optional — recorded in the stock ledger for each product">
+              <Input id="bulk-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Restock from supplier" />
+            </Field>
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
+              <Button size="sm" loading={busy} onClick={submit}>Save adjustment</Button>
+            </div>
+          </div>
+        </DialogContent>
+      )}
+    </Dialog>
   );
 }
 
@@ -296,7 +457,7 @@ function AdjustDialog({ product, onClose, onDone }: { product: ProductList | nul
             <Field label="New quantity" htmlFor="qty" required error={errors.new_qty}>
               <Input id="qty" inputMode="numeric" value={qty} invalid={!!errors.new_qty} onChange={(e) => setQty(e.target.value)} />
             </Field>
-            <Field label="Reason / note" htmlFor="note" required error={errors.note} hint="Recorded in the stock ledger">
+            <Field label="Reason / note" htmlFor="note" error={errors.note} hint="Optional — recorded in the stock ledger">
               <Input id="note" value={note} invalid={!!errors.note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Recount after audit" />
             </Field>
             <div className="flex justify-end gap-2">

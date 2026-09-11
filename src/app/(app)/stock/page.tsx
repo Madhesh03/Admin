@@ -341,6 +341,33 @@ function LowTab({ onAdjust, refreshKey }: { onAdjust?: (p: ProductList) => void;
     setPage(1);
   }, [threshold, setPage]);
 
+  // `onAdjust` is only passed down when the user has inventory.adjust_stock,
+  // so it doubles as the permission check for bulk adjust too.
+  const canAdjust = !!onAdjust;
+  const [selected, setSelected] = React.useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = React.useState(false);
+  function toggleOne(id: string, on: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+  function toggleAll(on: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const p of pageRows) {
+        if (on) next.add(p.id);
+        else next.delete(p.id);
+      }
+      return next;
+    });
+  }
+  const selectedProducts = pageRows.filter((p) => selected.has(p.id));
+  const allSelected = pageRows.length > 0 && selectedProducts.length === pageRows.length;
+  const someSelected = selectedProducts.length > 0 && !allSelected;
+
   return (
     <>
       <div className="mb-4 flex items-center gap-2">
@@ -348,6 +375,23 @@ function LowTab({ onAdjust, refreshKey }: { onAdjust?: (p: ProductList) => void;
         <Input type="number" className="w-24" value={threshold} min={0} onChange={(e) => setThreshold(Math.max(0, Number(e.target.value) || 0))} />
         {data && <span className="text-sm text-muted">{data.count} product{data.count !== 1 ? "s" : ""} at or below</span>}
       </div>
+
+      {canAdjust && selectedProducts.length > 0 && (
+        <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-forest/30 bg-forest/5 px-4 py-2.5">
+          <span className="text-sm font-semibold text-ink">{selectedProducts.length} selected</span>
+          <div className="flex items-center gap-2">
+            <Button size="sm" onClick={() => setBulkOpen(true)}>
+              <SlidersHorizontal className="size-4" />
+              Bulk adjust stock
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
+              <X className="size-4" />
+              Clear
+            </Button>
+          </div>
+        </div>
+      )}
+
       <Card>
         {loading ? (
           <TableSkeleton rows={5} cols={3} />
@@ -358,10 +402,39 @@ function LowTab({ onAdjust, refreshKey }: { onAdjust?: (p: ProductList) => void;
         ) : (
           <>
           <Table>
-            <THead><tr><Th className="w-[50%]">Product</Th><Th>Availability</Th><Th className="text-right">Qty</Th>{onAdjust && <Th />}</tr></THead>
+            <THead>
+              <tr>
+                {canAdjust && (
+                  <Th className="w-10">
+                    <input
+                      type="checkbox"
+                      aria-label="Select all"
+                      className="size-4 cursor-pointer accent-forest align-middle"
+                      checked={allSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = someSelected;
+                      }}
+                      onChange={(e) => toggleAll(e.target.checked)}
+                    />
+                  </Th>
+                )}
+                <Th className="w-[50%]">Product</Th><Th>Availability</Th><Th className="text-right">Qty</Th>{onAdjust && <Th />}
+              </tr>
+            </THead>
             <TBody>
               {pageRows.map((p) => (
                 <Tr key={p.id}>
+                  {canAdjust && (
+                    <Td onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${p.name}`}
+                        className="size-4 cursor-pointer accent-forest align-middle"
+                        checked={selected.has(p.id)}
+                        onChange={(e) => toggleOne(p.id, e.target.checked)}
+                      />
+                    </Td>
+                  )}
                   <Td>
                     <Link href={`/products/${p.id}`} className="font-semibold text-ink hover:text-forest">{p.name}</Link>
                     <p className="text-xs text-faint">{p.sku}</p>
@@ -377,6 +450,18 @@ function LowTab({ onAdjust, refreshKey }: { onAdjust?: (p: ProductList) => void;
           </>
         )}
       </Card>
+
+      {canAdjust && (
+        <BulkAdjustDialog
+          open={bulkOpen}
+          onClose={() => setBulkOpen(false)}
+          products={selectedProducts}
+          onDone={() => {
+            setSelected(new Set());
+            reload();
+          }}
+        />
+      )}
     </>
   );
 }

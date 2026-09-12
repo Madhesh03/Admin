@@ -79,10 +79,17 @@ export function readSession(): StoredSession | null {
   }
 }
 
+/** Fired whenever a hard auth failure clears the session, so React state (AuthProvider) can drop its stale copy and the route guard can redirect to /login. */
+export const SESSION_EXPIRED_EVENT = "sois:session-expired";
+
 export function writeSession(session: StoredSession | null): void {
   if (!isBrowser()) return;
-  if (session) window.localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-  else window.localStorage.removeItem(SESSION_KEY);
+  if (session) {
+    window.localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  } else {
+    window.localStorage.removeItem(SESSION_KEY);
+    window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+  }
 }
 
 /* -------------------------------------------------------------------------- */

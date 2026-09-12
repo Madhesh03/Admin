@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { getSession, logout as apiLogout } from "@/lib/admin-api";
+import { SESSION_EXPIRED_EVENT } from "@/lib/http";
 import type { StoredSession } from "@/lib/mock-data";
 import type { StaffUser } from "@/lib/types";
 
@@ -29,6 +30,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => {
       active = false;
     };
+  }, []);
+
+  // A request elsewhere in the app hit a hard auth failure (e.g. the refresh
+  // token itself expired after being away) and cleared the stored session —
+  // drop our stale in-memory copy too so the (app) layout's guard redirects
+  // to /login instead of leaving every card stuck on a 401 error forever.
+  React.useEffect(() => {
+    const onSessionExpired = () => setSession(null);
+    window.addEventListener(SESSION_EXPIRED_EVENT, onSessionExpired);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onSessionExpired);
   }, []);
 
   const logout = React.useCallback(async () => {

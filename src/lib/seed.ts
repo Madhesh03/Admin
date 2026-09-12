@@ -335,6 +335,7 @@ function makeProduct(input: PInput): StoredProduct {
     size_stocks: distributeSizeStock(input.sizes ?? "", qty, sku, netWeight),
     care_instruction: CARE,
     is_featured: input.featured ?? false,
+    is_gift_hamper: false,
     tags: input.tags ?? [],
     media: makeMedia(input.name, metal, 3),
     created_at: created,

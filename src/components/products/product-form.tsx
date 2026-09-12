@@ -70,6 +70,7 @@ interface FormState {
   variants: Variant[];
   care_instruction: string;
   is_featured: boolean;
+  is_gift_hamper: boolean;
   tags: string;
   stones: Stone[];
   certs: Cert[];
@@ -83,7 +84,7 @@ function toState(p?: ProductDetail): FormState {
       stock_type: "quantity", status: "draft", gross_weight: "", net_weight: "",
       dimensions: [],
       variant_label: "", size_unit: "", variants: [],
-      care_instruction: "", is_featured: false,
+      care_instruction: "", is_featured: false, is_gift_hamper: false,
       tags: "", stones: [], certs: [],
     };
   return {
@@ -116,6 +117,7 @@ function toState(p?: ProductDetail): FormState {
     })),
     care_instruction: p.care_instruction,
     is_featured: p.is_featured,
+    is_gift_hamper: p.is_gift_hamper,
     tags: p.tags.join(", "),
     stones: p.stone_details.map((s) => ({ type: s.type, weight: s.weight, quality: s.quality, count: String(s.count) })),
     certs: Object.entries(p.certificate_details).map(([key, value]) => ({ key, value })),
@@ -245,6 +247,7 @@ export function ProductForm({
       ...variationPayload,
       care_instruction: form.care_instruction,
       is_featured: form.is_featured,
+      is_gift_hamper: form.is_gift_hamper,
       tags: form.tags.split(",").map((t) => t.trim()).filter(Boolean),
     };
   }
@@ -652,6 +655,7 @@ export function ProductForm({
             <Row label="Effective price"><span className="font-semibold">{formatPrice(effective)}</span></Row>
             {discNum > 0 && <Row label="List price"><span className="text-faint line-through">{formatPrice(priceNum)}</span></Row>}
             <Row label="Featured"><span className={form.is_featured ? "font-semibold text-forest" : "text-faint"}>{form.is_featured ? "Yes" : "No"}</span></Row>
+            <Row label="Gift hamper"><span className={form.is_gift_hamper ? "font-semibold text-forest" : "text-faint"}>{form.is_gift_hamper ? "Yes" : "No"}</span></Row>
           </CardBody>
         </Card>
 
@@ -694,6 +698,7 @@ export function ProductForm({
               </NativeSelect>
             </Field>
             <ToggleField label="Featured product" checked={form.is_featured} onCheckedChange={(v) => set("is_featured", v)} />
+            <ToggleField label="Gift hamper" checked={form.is_gift_hamper} onCheckedChange={(v) => set("is_gift_hamper", v)} />
           </CardBody>
         </Card>
 

@@ -57,6 +57,7 @@ export const productFormSchema = z.object({
   variations: z.array(variationSchema).optional(),
   care_instruction: z.string().trim().default(""),
   is_featured: z.boolean().default(false),
+  is_gift_hamper: z.boolean().default(false),
   tags: z.array(z.string().trim()).default([]),
 });
 export type ProductFormParsed = z.output<typeof productFormSchema>;

@@ -55,6 +55,7 @@ export interface StoredProduct {
   size_stocks: StoredVariation[];
   care_instruction: string;
   is_featured: boolean;
+  is_gift_hamper: boolean;
   tags: string[];
   media: ProductMedia[];
   created_at: string;

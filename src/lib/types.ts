@@ -240,6 +240,7 @@ export interface ProductList {
   has_sizes: boolean;
   status: ProductStatus;
   is_featured: boolean;
+  is_gift_hamper: boolean;
   thumbnail_key: string;
   /** Presigned GET URL for thumbnail_key (real backend); null if S3 unset. */
   thumbnail_url?: string | null;
@@ -284,6 +285,7 @@ export interface ProductDetail {
   size_stock: ProductSizeStock[];
   care_instruction: string;
   is_featured: boolean;
+  is_gift_hamper: boolean;
   tags: string[];
   thumbnail_key: string;
   /** Presigned GET URL for thumbnail_key (real backend); null if S3 unset. */

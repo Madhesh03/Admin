@@ -271,6 +271,7 @@ function toProductList(p: StoredProduct): ProductList {
     has_sizes: parseSizes(p.available_sizes).length > 0,
     status: p.status,
     is_featured: p.is_featured,
+    is_gift_hamper: p.is_gift_hamper,
     thumbnail_key: thumb,
     primary_image: primary
       ? { s3_key: primary.s3_key, alt_text: primary.alt_text }
@@ -315,6 +316,7 @@ function toProductDetail(p: StoredProduct): ProductDetail {
     size_stock: toSizeStockView(p),
     care_instruction: p.care_instruction,
     is_featured: p.is_featured,
+    is_gift_hamper: p.is_gift_hamper,
     tags: p.tags,
     thumbnail_key: detailPrimaryKey(toDetailForThumb(p)) ?? "",
     hover_thumbnail_key: p.media.find((m) => m.is_hover && m.media_type === "image")?.s3_key ?? "",
@@ -441,6 +443,7 @@ export interface ProductWriteInput {
   variations?: VariationInput[];
   care_instruction?: string;
   is_featured?: boolean;
+  is_gift_hamper?: boolean;
   tags?: string[];
 }
 
@@ -547,6 +550,7 @@ export async function createProduct(
     size_stocks: reconcileSizeStocks(availableSizes, [], input.variations, sku),
     care_instruction: input.care_instruction ?? "",
     is_featured: input.is_featured ?? false,
+    is_gift_hamper: input.is_gift_hamper ?? false,
     tags: input.tags ?? [],
     media: [],
     created_at: now,

@@ -666,7 +666,7 @@ export const METAL_LABEL: Record<MetalType, string> = {
   silver: "Silver",
   gold: "Gold",
   gold_plated: "Gold Plated",
-  rose_gold: "Rose Gold",
+  rose_gold: "Rose Gold Plated",
   antique: "Antique",
   other: "Other",
 };

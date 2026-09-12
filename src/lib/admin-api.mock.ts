@@ -635,6 +635,8 @@ export interface BulkProductChanges {
   collection_id?: string | null;
   metal_type?: MetalType;
   is_featured?: boolean;
+  /** Replaces each product's tag list outright; [] clears them. */
+  tags?: string[];
 }
 
 export interface BulkUpdateProductsInput {
@@ -687,6 +689,7 @@ export async function bulkUpdateProducts(
       ...("collection_id" in changes ? { collection_id: changes.collection_id ?? null } : {}),
       ...(changes.metal_type != null ? { metal_type: changes.metal_type } : {}),
       ...(changes.is_featured != null ? { is_featured: changes.is_featured } : {}),
+      ...(changes.tags != null ? { tags: changes.tags } : {}),
       updated_at: now,
     };
   });

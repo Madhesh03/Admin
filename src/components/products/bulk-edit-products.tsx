@@ -24,6 +24,7 @@ const KEEP = "__keep__";
 const CLEAR = "__clear__";
 
 type PriceMode = "none" | "set" | "increase" | "decrease";
+type TagMode = "none" | "replace" | "clear";
 
 /**
  * WooCommerce-style bulk editor for the common product fields — regular price
@@ -55,6 +56,8 @@ export function BulkEditProductsDialog({
   const [collectionId, setCollectionId] = React.useState<string>(KEEP);
   const [metal, setMetal] = React.useState<string>(KEEP);
   const [featured, setFeatured] = React.useState<string>(KEEP);
+  const [tagMode, setTagMode] = React.useState<TagMode>("none");
+  const [tags, setTags] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
 
@@ -70,6 +73,8 @@ export function BulkEditProductsDialog({
     setCollectionId(KEEP);
     setMetal(KEEP);
     setFeatured(KEEP);
+    setTagMode("none");
+    setTags("");
     setError(null);
   }, [open]);
 
@@ -100,6 +105,16 @@ export function BulkEditProductsDialog({
     if (collectionId !== KEEP) changes.collection_id = collectionId === CLEAR ? null : collectionId;
     if (metal !== KEEP) changes.metal_type = metal as MetalType;
     if (featured !== KEEP) changes.is_featured = featured === "yes";
+    if (tagMode === "clear") {
+      changes.tags = [];
+    } else if (tagMode === "replace") {
+      const list = tags.split(",").map((t) => t.trim()).filter(Boolean);
+      if (!list.length) {
+        setError("Enter at least one tag, or choose “Clear all”.");
+        return null;
+      }
+      changes.tags = list;
+    }
 
     if (Object.keys(changes).length === 0) {
       setError("Choose at least one field to change.");
@@ -236,6 +251,30 @@ export function BulkEditProductsDialog({
                 </NativeSelect>
               </Field>
             </div>
+
+            <Field
+              label="Tags"
+              hint="Replacing overwrites each product’s existing tags."
+            >
+              <div className="flex gap-2">
+                <NativeSelect
+                  className="w-auto min-w-[130px]"
+                  value={tagMode}
+                  onChange={(e) => setTagMode(e.target.value as TagMode)}
+                >
+                  <option value="none">No change</option>
+                  <option value="replace">Replace with</option>
+                  <option value="clear">Clear all</option>
+                </NativeSelect>
+                {tagMode === "replace" && (
+                  <Input
+                    value={tags}
+                    onChange={(e) => setTags(e.target.value)}
+                    placeholder="new, bestseller"
+                  />
+                )}
+              </div>
+            </Field>
 
             <FieldError>{error}</FieldError>
 

@@ -49,6 +49,7 @@ export type {
   ListNotificationsParams,
   ResendNotificationInput,
   StaffCreateInput,
+  ListAuditLogsParams,
 } from "./admin-api.mock";
 
 /* -------------------------------------------------------------------------- */
@@ -156,6 +157,8 @@ export const cancelShipment = USE_MOCKS ? mock.cancelShipment : real.cancelShipm
 /* Notifications — what the customer was told, and whether it landed */
 export const listNotifications = USE_MOCKS ? mock.listNotifications : real.listNotifications;
 export const resendNotification = USE_MOCKS ? mock.resendNotification : real.resendNotification;
+
+export const listAuditLogs = USE_MOCKS ? mock.listAuditLogs : real.listAuditLogs;
 
 /* Staff & roles */
 export const listRoles = USE_MOCKS ? mock.listRoles : real.listRoles;

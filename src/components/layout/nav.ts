@@ -10,6 +10,7 @@ import {
   Factory,
   ClipboardList,
   UserCog,
+  ScrollText,
   type LucideIcon,
 } from "lucide-react";
 
@@ -73,6 +74,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Settings",
     items: [
       { href: "/staff", label: "Staff & Roles", icon: UserCog, perm: "accounts.manage_staff", match: startsWith("/staff") },
+      { href: "/audit", label: "Audit Log", icon: ScrollText, perm: "audit.view_log", match: startsWith("/audit") },
     ],
   },
 ];

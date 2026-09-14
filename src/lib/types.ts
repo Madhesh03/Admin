@@ -619,6 +619,39 @@ export interface NotificationLog {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Audit trail                                                                */
+/* -------------------------------------------------------------------------- */
+
+export type AuditAction =
+  | "create"
+  | "update"
+  | "delete"
+  | "status_change"
+  | "login"
+  | "logout";
+
+/** One immutable entry in the audit trail (GET /api/v1/audit/logs/). */
+export interface AuditLog {
+  id: string;
+  /** Staff user who acted; null for system/customer/background actions. */
+  actor_id: string | null;
+  actor_email: string;
+  action: AuditAction;
+  action_display: string;
+  /** The affected model, e.g. "Order", "Product". */
+  model_name: string;
+  object_id: string;
+  /**
+   * For updates: `{ field: { from, to } }`; for creates: `{ field: value }`.
+   * Shape varies by the service that wrote it, so treat values as unknown.
+   */
+  changes: Record<string, unknown>;
+  ip_address: string | null;
+  user_agent: string;
+  timestamp: string;
+}
+
+/* -------------------------------------------------------------------------- */
 /* Derived / UI-only (no backend endpoint yet — see admin-api TODOs)          */
 /* -------------------------------------------------------------------------- */
 
@@ -785,6 +818,24 @@ export const NOTIFICATION_EVENT_LABEL: Record<NotificationEventType, string> = {
   order_returned: "Returned to origin",
   refund_initiated: "Refund initiated",
   password_reset: "Password reset",
+};
+
+export const AUDIT_ACTIONS: AuditAction[] = [
+  "create",
+  "update",
+  "delete",
+  "status_change",
+  "login",
+  "logout",
+];
+
+export const AUDIT_ACTION_LABEL: Record<AuditAction, string> = {
+  create: "Create",
+  update: "Update",
+  delete: "Delete",
+  status_change: "Status change",
+  login: "Login",
+  logout: "Logout",
 };
 
 export const PO_STATUSES: PurchaseOrderStatus[] = [

@@ -74,6 +74,8 @@ import type {
   StockValuationRow,
   StoneDetail,
   Supplier,
+  AuditLog,
+  AuditAction,
 } from "./types";
 import { ORDER_TRANSITIONS } from "./types";
 
@@ -2230,6 +2232,104 @@ export async function resendNotification(
       input.channel ? [input.channel] : ["email", "whatsapp"],
     ),
   );
+}
+
+/* -------------------------------------------------------------------------- */
+/* AUDIT TRAIL                                                                 */
+/* -------------------------------------------------------------------------- */
+
+export interface ListAuditLogsParams {
+  model_name?: string;
+  action?: AuditAction | "all";
+  object_id?: string;
+  actor_email?: string;
+  date_from?: string;
+  date_to?: string;
+  page?: number;
+  page_size?: number;
+}
+
+/**
+ * The real backend writes audit rows from every mutating service method; the
+ * mock has no such store, so it synthesizes a plausible trail from the demo
+ * data (products, orders, staff) purely so the screen has something to page
+ * and filter through in mock mode.
+ */
+function synthAuditLogs(): AuditLog[] {
+  const actor = getStoredSession()?.staff.email ?? "owner@soisstore.co";
+  const rows: AuditLog[] = [];
+  const at = (daysAgo: number, h: number) =>
+    new Date(Date.now() - daysAgo * 864e5 - h * 36e5).toISOString();
+
+  get("products").forEach((p, i) => {
+    rows.push({
+      id: newId(),
+      actor_id: newId(),
+      actor_email: actor,
+      action: "create",
+      action_display: "Create",
+      model_name: "Product",
+      object_id: p.id,
+      changes: { name: p.name, sku: p.sku },
+      ip_address: "203.0.113.10",
+      user_agent: "Mozilla/5.0",
+      timestamp: at(i % 20, i % 24),
+    });
+  });
+
+  get("orders").forEach((o, i) => {
+    rows.push({
+      id: newId(),
+      actor_id: null,
+      actor_email: "",
+      action: "status_change",
+      action_display: "Status change",
+      model_name: "Order",
+      object_id: o.id,
+      changes: { status: { from: "paid", to: o.status } },
+      ip_address: null,
+      user_agent: "",
+      timestamp: at(i % 15, (i * 2) % 24),
+    });
+  });
+
+  get("staff").forEach((s, i) => {
+    rows.push({
+      id: newId(),
+      actor_id: newId(),
+      actor_email: actor,
+      action: "update",
+      action_display: "Update",
+      model_name: "StaffUser",
+      object_id: s.id,
+      changes: { role: { from: "support_staff", to: s.role.name } },
+      ip_address: "203.0.113.10",
+      user_agent: "Mozilla/5.0",
+      timestamp: at(i % 10, i % 24),
+    });
+  });
+
+  return rows;
+}
+
+export async function listAuditLogs(
+  params: ListAuditLogsParams = {},
+): Promise<Page<AuditLog>> {
+  await tick();
+  requirePermission("audit.view_log");
+  let list = synthAuditLogs();
+  if (params.model_name) list = list.filter((l) => l.model_name === params.model_name);
+  if (params.action && params.action !== "all")
+    list = list.filter((l) => l.action === params.action);
+  if (params.object_id) list = list.filter((l) => l.object_id === params.object_id);
+  if (params.actor_email) {
+    const q = params.actor_email.toLowerCase();
+    list = list.filter((l) => l.actor_email.toLowerCase().includes(q));
+  }
+  if (params.date_from) list = list.filter((l) => l.timestamp >= params.date_from!);
+  if (params.date_to) list = list.filter((l) => l.timestamp <= params.date_to!);
+  list.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  return clone(paginate(list, params.page, params.page_size ?? 20));
 }
 
 /* -------------------------------------------------------------------------- */

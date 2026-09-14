@@ -53,6 +53,7 @@ import type {
   StockLedgerEntry,
   StockValuationRow,
   Supplier,
+  AuditLog,
 } from "./types";
 // Input DTOs live in the mock module (single source of truth for the seam
 // contract). These are type-only imports — erased at compile time, so no mock
@@ -78,6 +79,7 @@ import type {
   ResendNotificationInput,
   StaffCreateInput,
   SupplierInput,
+  ListAuditLogsParams,
 } from "./admin-api.mock";
 
 /** Drop "all"/empty sentinel values so we don't send them as real filters. */
@@ -637,6 +639,25 @@ export function resendNotification(
     order_id: input.order_id,
     event_type: input.event_type,
     channel: input.channel,
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/* AUDIT TRAIL                                                                 */
+/* -------------------------------------------------------------------------- */
+
+export function listAuditLogs(
+  params: ListAuditLogsParams = {},
+): Promise<Page<AuditLog>> {
+  return apiGetList<AuditLog>("/audit/logs/", {
+    model_name: params.model_name,
+    action: filter(params.action),
+    object_id: params.object_id,
+    actor_email: params.actor_email,
+    date_from: params.date_from,
+    date_to: params.date_to,
+    page: params.page,
+    page_size: params.page_size,
   });
 }
 

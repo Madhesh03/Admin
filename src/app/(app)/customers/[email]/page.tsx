@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { UserX, MapPin, Mail, Phone } from "lucide-react";
+import { UserX, MapPin, Mail, Phone, BadgeCheck, ShieldX } from "lucide-react";
 import { getCustomer } from "@/lib/admin-api";
 import type { Customer, Order } from "@/lib/types";
 import { useAsync } from "@/lib/use-async";
@@ -10,7 +10,7 @@ import { formatDate, formatPrice } from "@/lib/utils";
 import { RequirePermission } from "@/components/permission-gate";
 import { PageHeader } from "@/components/layout/page-header";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
-import { OrderStatusBadge } from "@/components/ui/badge";
+import { Badge, OrderStatusBadge } from "@/components/ui/badge";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 
@@ -29,7 +29,7 @@ export default function CustomerDetailPage() {
       ) : error ? (
         <Card><ErrorState message={error} onRetry={reload} /></Card>
       ) : !data ? (
-        <Card><EmptyState icon={UserX} title="Customer not found" description="No orders match this email." /></Card>
+        <Card><EmptyState icon={UserX} title="Customer not found" description="No customer matches this email." /></Card>
       ) : (
         <Detail data={data} />
       )}
@@ -45,18 +45,23 @@ function Detail({ data }: { data: Data }) {
         <Card>
           <CardHeader><CardTitle>Profile</CardTitle></CardHeader>
           <CardBody className="space-y-3 text-sm">
-            <Row icon={Mail} value={customer.email} />
-            {customer.phone && <Row icon={Phone} value={customer.phone} />}
+            <Row icon={Mail} value={customer.email} verified={customer.is_email_verified} />
+            {customer.phone && <Row icon={Phone} value={customer.phone} verified={customer.is_phone_verified} />}
+            <div className="flex flex-wrap gap-1.5">
+              {!customer.is_active && <Badge className="bg-red-100 text-red-700">Inactive</Badge>}
+              {customer.order_count === 0 && <Badge className="bg-surface text-muted">No orders yet</Badge>}
+            </div>
             <div className="grid grid-cols-2 gap-3 border-t border-line pt-3">
               <Stat label="Orders" value={String(customer.order_count)} />
               <Stat label="Total spent" value={formatPrice(customer.total_spent)} />
             </div>
-            <p className="text-xs text-faint">Customer since {formatDate(customer.first_order_date)}</p>
+            <p className="text-xs text-faint">Registered {formatDate(customer.created_at)}</p>
           </CardBody>
         </Card>
         <Card>
           <CardHeader><CardTitle>Saved addresses</CardTitle></CardHeader>
           <CardBody className="space-y-3">
+            {customer.addresses.length === 0 && <p className="text-sm text-faint">No saved addresses yet.</p>}
             {customer.addresses.map((a, i) => (
               <div key={i} className="flex gap-2.5 text-sm">
                 <MapPin className="mt-0.5 size-4 shrink-0 text-faint" />
@@ -77,6 +82,9 @@ function Detail({ data }: { data: Data }) {
             <CardTitle>Order history</CardTitle>
             <span className="text-sm text-faint">{orders.length} orders</span>
           </CardHeader>
+          {orders.length === 0 ? (
+            <EmptyState title="No orders yet" description="This customer hasn't placed an order." />
+          ) : (
           <Table>
             <THead><tr><Th>Order</Th><Th>Date</Th><Th className="text-center">Items</Th><Th className="text-right">Total</Th><Th>Status</Th></tr></THead>
             <TBody>
@@ -91,17 +99,23 @@ function Detail({ data }: { data: Data }) {
               ))}
             </TBody>
           </Table>
+          )}
         </Card>
       </div>
     </div>
   );
 }
 
-function Row({ icon: Icon, value }: { icon: React.ComponentType<{ className?: string }>; value: string }) {
+function Row({ icon: Icon, value, verified }: { icon: React.ComponentType<{ className?: string }>; value: string; verified?: boolean }) {
   return (
     <div className="flex items-center gap-2.5 text-muted">
       <Icon className="size-4 shrink-0 text-faint" />
       <span className="truncate text-ink">{value}</span>
+      {verified !== undefined && (
+        verified
+          ? <BadgeCheck className="size-4 shrink-0 text-green-600" aria-label="Verified" />
+          : <ShieldX className="size-4 shrink-0 text-faint" aria-label="Not verified" />
+      )}
     </div>
   );
 }

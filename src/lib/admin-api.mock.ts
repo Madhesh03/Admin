@@ -43,6 +43,7 @@ import type {
   Collection,
   Courier,
   Customer,
+  CustomerSummary,
   DashboardStats,
   MediaType,
   MetalType,
@@ -2489,18 +2490,25 @@ export async function getStats(): Promise<DashboardStats> {
   });
 }
 
-export async function listCustomers(
-  params: { search?: string } = {},
-): Promise<Customer[]> {
-  await tick();
-  requirePermission("orders.view_order");
-  // TODO(backend): no staff customer endpoint — derived from orders here.
+export type CustomerSort =
+  | "last_order_date" | "created_at" | "total_spent" | "order_count" | "name";
+
+export interface ListCustomersParams {
+  search?: string;
+  has_orders?: "" | "true" | "false";
+  sort?: CustomerSort;
+  page?: number;
+  page_size?: number;
+}
+
+/** Build the full customer directory from demo orders (all are registered). */
+function customerDirectory(): Customer[] {
   const byEmail = new Map<string, Order[]>();
   for (const o of get("orders")) {
     const k = o.customer_email.toLowerCase();
     byEmail.set(k, [...(byEmail.get(k) ?? []), o]);
   }
-  let customers: Customer[] = [...byEmail.entries()].map(([email, orders]) => {
+  return [...byEmail.entries()].map(([email, orders]) => {
     const sorted = orders.slice().sort((a, b) => a.created_at.localeCompare(b.created_at));
     const latest = sorted[sorted.length - 1];
     const seen = new Set<string>();
@@ -2513,9 +2521,14 @@ export async function listCustomers(
         return true;
       });
     return {
+      id: email,
       email: latest.customer_email,
       name: latest.customer_name ?? latest.shipping_address.full_name,
       phone: latest.shipping_address.phone,
+      is_active: true,
+      is_email_verified: true,
+      is_phone_verified: Boolean(latest.shipping_address.phone),
+      created_at: sorted[0].created_at,
       order_count: sorted.length,
       total_spent: sorted
         .filter((o) => !["cancelled", "refunded"].includes(o.status))
@@ -2525,13 +2538,50 @@ export async function listCustomers(
       addresses,
     };
   });
+}
+
+const CUSTOMER_SORTS: Record<CustomerSort, (a: Customer, b: Customer) => number> = {
+  last_order_date: (a, b) => (b.last_order_date ?? "").localeCompare(a.last_order_date ?? ""),
+  created_at: (a, b) => b.created_at.localeCompare(a.created_at),
+  total_spent: (a, b) => b.total_spent - a.total_spent,
+  order_count: (a, b) => b.order_count - a.order_count,
+  name: (a, b) => (a.name || a.email).localeCompare(b.name || b.email),
+};
+
+export async function listCustomers(
+  params: ListCustomersParams = {},
+): Promise<Page<Customer>> {
+  await tick();
+  requirePermission("orders.view_order");
+  let customers = customerDirectory();
   const q = params.search?.trim().toLowerCase();
   if (q)
     customers = customers.filter(
-      (c) => c.name.toLowerCase().includes(q) || c.email.toLowerCase().includes(q),
+      (c) =>
+        c.name.toLowerCase().includes(q) ||
+        c.email.toLowerCase().includes(q) ||
+        c.phone.toLowerCase().includes(q),
     );
-  customers.sort((a, b) => (b.last_order_date ?? "").localeCompare(a.last_order_date ?? ""));
-  return clone(customers);
+  if (params.has_orders === "true") customers = customers.filter((c) => c.order_count > 0);
+  else if (params.has_orders === "false") customers = customers.filter((c) => c.order_count === 0);
+  customers.sort(CUSTOMER_SORTS[params.sort ?? "last_order_date"]);
+  return clone(paginate(customers, params.page, params.page_size));
+}
+
+export async function getCustomerSummary(): Promise<CustomerSummary> {
+  await tick();
+  requirePermission("orders.view_order");
+  const customers = customerDirectory();
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  const withOrders = customers.filter((c) => c.order_count > 0).length;
+  return clone({
+    total: customers.length,
+    with_orders: withOrders,
+    zero_order: customers.length - withOrders,
+    new_this_month: customers.filter((c) => new Date(c.created_at).getTime() >= monthStart).length,
+    total_revenue: customers.reduce((s, c) => s + c.total_spent, 0),
+  });
 }
 
 export async function getCustomer(
@@ -2543,11 +2593,7 @@ export async function getCustomer(
   const orders = get("orders")
     .filter((o) => o.customer_email.toLowerCase() === key)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
-  if (!orders.length) return null;
-  const [customer] = await listCustomers({ search: email });
-  const match = customer && customer.email.toLowerCase() === key
-    ? customer
-    : (await listCustomers()).find((c) => c.email.toLowerCase() === key);
+  const match = customerDirectory().find((c) => c.email.toLowerCase() === key);
   if (!match) return null;
   return clone({ customer: match, orders });
 }

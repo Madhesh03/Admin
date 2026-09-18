@@ -656,14 +656,27 @@ export interface AuditLog {
 /* -------------------------------------------------------------------------- */
 
 export interface Customer {
+  id: string;
   email: string;
   name: string;
   phone: string;
+  is_active: boolean;
+  is_email_verified: boolean;
+  is_phone_verified: boolean;
+  created_at: string;
   order_count: number;
   total_spent: number;
   last_order_date: string | null;
   addresses: Address[];
-  first_order_date: string;
+  first_order_date: string | null;
+}
+
+export interface CustomerSummary {
+  total: number;
+  with_orders: number;
+  zero_order: number;
+  new_this_month: number;
+  total_revenue: number;
 }
 
 export interface DashboardStats {

@@ -36,6 +36,7 @@ import type {
   Collection,
   CourierRate,
   Customer,
+  CustomerSummary,
   DashboardStats,
   Order,
   OrderStatus,
@@ -67,6 +68,7 @@ import type {
   ConfirmMediaInput,
   CourierRatesParams,
   CreateShipmentInput,
+  ListCustomersParams,
   ListNotificationsParams,
   ListOrdersParams,
   ListProductsParams,
@@ -752,9 +754,19 @@ export function getStats(): Promise<DashboardStats> {
 }
 
 export function listCustomers(
-  params: { search?: string } = {},
-): Promise<Customer[]> {
-  return apiGet<Customer[]>("/staff/customers/", { search: params.search });
+  params: ListCustomersParams = {},
+): Promise<Page<Customer>> {
+  return apiGetList<Customer>("/staff/customers/", {
+    search: params.search,
+    has_orders: params.has_orders || undefined,
+    sort: params.sort,
+    page: params.page,
+    page_size: params.page_size,
+  });
+}
+
+export function getCustomerSummary(): Promise<CustomerSummary> {
+  return apiGet<CustomerSummary>("/staff/customers/summary/");
 }
 
 export async function getCustomer(

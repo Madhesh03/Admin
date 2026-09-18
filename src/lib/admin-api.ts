@@ -40,6 +40,8 @@ export type {
   CollectionInput,
   SupplierInput,
   PurchaseOrderCreateInput,
+  ListCustomersParams,
+  CustomerSort,
   ListOrdersParams,
   OrderOrdering,
   ListReturnsParams,
@@ -175,4 +177,5 @@ export const getSession = USE_MOCKS ? mock.getSession : real.getSession;
 /* Dashboard + customers */
 export const getStats = USE_MOCKS ? mock.getStats : real.getStats;
 export const listCustomers = USE_MOCKS ? mock.listCustomers : real.listCustomers;
+export const getCustomerSummary = USE_MOCKS ? mock.getCustomerSummary : real.getCustomerSummary;
 export const getCustomer = USE_MOCKS ? mock.getCustomer : real.getCustomer;

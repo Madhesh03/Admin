@@ -317,6 +317,8 @@ export function buildSeedReviews(products: StoredProduct[]): Review[] {
       body,
       customer_name: name,
       is_approved: approved,
+      is_rejected: false,
+      images: [],
       created_at: iso(date),
     };
   };

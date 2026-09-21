@@ -13,6 +13,7 @@
  * would send it as the `X-Tenant-ID` header.
  */
 import { ADMIN_PASSWORD, DEFAULT_TENANT_ID } from "./auth-config";
+import { realFetch } from "./real-fetch";
 import {
   detailPrimaryKey,
   effectivePrice,
@@ -636,31 +637,37 @@ export async function updateCollection(
 /* REVIEWS                                                                     */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Reviews are wired to the real sois-backend (see real-fetch.ts), not the
+ * mock store — this is the one seam in this file that already talks to a
+ * live server. `requirePermission` still runs first as a client-side RBAC
+ * gate against the mock staff session used for the rest of the app.
+ */
 export async function listReviews(
-  params: { approved?: boolean } = {},
+  params: { approved?: boolean; rejected?: boolean } = {},
 ): Promise<Review[]> {
-  await tick();
   requirePermission("catalog.view_product");
-  // TODO(backend): fetch(`/catalog/staff/reviews/?approved=...`)
-  let list = get("reviews").slice();
-  if (params.approved != null)
-    list = list.filter((r) => r.is_approved === params.approved);
-  list.sort((a, b) => b.created_at.localeCompare(a.created_at));
-  return clone(list);
+  const qs = new URLSearchParams();
+  if (params.approved != null) qs.set("approved", String(params.approved));
+  if (params.rejected != null) qs.set("rejected", String(params.rejected));
+  const query = qs.toString();
+  return realFetch<Review[]>(
+    `/catalog/staff/reviews/${query ? `?${query}` : ""}`,
+  );
 }
 
 export async function approveReview(id: string): Promise<Review> {
-  await tick(true);
   requirePermission("catalog.edit_product");
-  // TODO(backend): fetch(`/catalog/staff/reviews/${id}/approve/`, { method:"PATCH" })
-  const reviews = get("reviews");
-  const i = reviews.findIndex((r) => r.id === id);
-  if (i === -1) throw new ApiError("Review not found", 404);
-  const updated = { ...reviews[i], is_approved: true };
-  const next = reviews.slice();
-  next[i] = updated;
-  set("reviews", next);
-  return clone(updated);
+  return realFetch<Review>(`/catalog/staff/reviews/${id}/approve/`, {
+    method: "PATCH",
+  });
+}
+
+export async function rejectReview(id: string): Promise<Review> {
+  requirePermission("catalog.edit_product");
+  return realFetch<Review>(`/catalog/staff/reviews/${id}/reject/`, {
+    method: "PATCH",
+  });
 }
 
 /* -------------------------------------------------------------------------- */

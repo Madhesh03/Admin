@@ -11,6 +11,7 @@ import {
   ClipboardList,
   UserCog,
   ScrollText,
+  Star,
   type LucideIcon,
 } from "lucide-react";
 
@@ -46,8 +47,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: "/products", label: "Products", icon: Package, perm: "catalog.view_product", match: startsWith("/products") },
       { href: "/categories", label: "Categories", icon: FolderTree, perm: "catalog.view_product", match: startsWith("/categories") },
       { href: "/collections", label: "Collections", icon: Layers, perm: "catalog.view_product", match: startsWith("/collections") },
-      // Hidden: Reviews module
-      // { href: "/reviews", label: "Reviews", icon: Star, perm: "catalog.view_product", match: startsWith("/reviews") },
+      { href: "/reviews", label: "Reviews", icon: Star, perm: "catalog.view_product", match: startsWith("/reviews") },
     ],
   },
   {

@@ -223,15 +223,20 @@ export function updateCollection(
 /* -------------------------------------------------------------------------- */
 
 export function listReviews(
-  params: { approved?: boolean } = {},
+  params: { approved?: boolean; rejected?: boolean } = {},
 ): Promise<Review[]> {
   return apiGet<Review[]>("/catalog/staff/reviews/", {
     approved: params.approved === undefined ? undefined : String(params.approved),
+    rejected: params.rejected === undefined ? undefined : String(params.rejected),
   });
 }
 
 export function approveReview(id: string): Promise<Review> {
   return apiPatch<Review>(`/catalog/staff/reviews/${id}/approve/`);
+}
+
+export function rejectReview(id: string): Promise<Review> {
+  return apiPatch<Review>(`/catalog/staff/reviews/${id}/reject/`);
 }
 
 /* -------------------------------------------------------------------------- */

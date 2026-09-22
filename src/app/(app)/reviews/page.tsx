@@ -1,8 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { Star, Check } from "lucide-react";
-import { approveReview, listReviews } from "@/lib/admin-api";
+import { Star, Check, X } from "lucide-react";
+import { approveReview, listReviews, rejectReview } from "@/lib/admin-api";
 import type { Review } from "@/lib/types";
 import { useAsync, usePagination } from "@/lib/use-async";
 import { formatDate, cn } from "@/lib/utils";
@@ -35,12 +35,26 @@ function Stars({ rating }: { rating: number }) {
   );
 }
 
+type Filter = "all" | "pending" | "approved" | "rejected";
+
+function reviewParams(filter: Filter): { approved?: boolean; rejected?: boolean } {
+  switch (filter) {
+    case "pending":
+      return { approved: false, rejected: false };
+    case "approved":
+      return { approved: true };
+    case "rejected":
+      return { rejected: true };
+    default:
+      return {};
+  }
+}
+
 function ReviewsInner() {
   const { can } = useAuth();
-  const [filter, setFilter] = React.useState<"all" | "pending" | "approved">("pending");
-  const approvedParam = filter === "all" ? undefined : filter === "approved";
+  const [filter, setFilter] = React.useState<Filter>("pending");
   const { data, loading, error, reload } = useAsync<Review[]>(
-    () => listReviews(approvedParam == null ? {} : { approved: approvedParam }),
+    () => listReviews(reviewParams(filter)),
     [filter],
   );
   const [busyId, setBusyId] = React.useState<string | null>(null);
@@ -62,13 +76,27 @@ function ReviewsInner() {
     }
   }
 
+  async function reject(r: Review) {
+    setBusyId(r.id);
+    try {
+      await rejectReview(r.id);
+      toast.success("Review rejected");
+      reload();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not reject");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   return (
     <div>
       <PageHeader title="Reviews" description="Moderate customer reviews before they appear on the storefront." />
       <div className="mb-4 max-w-[200px]">
-        <NativeSelect value={filter} onChange={(e) => setFilter(e.target.value as typeof filter)}>
+        <NativeSelect value={filter} onChange={(e) => setFilter(e.target.value as Filter)}>
           <option value="pending">Pending approval</option>
           <option value="approved">Approved</option>
+          <option value="rejected">Rejected</option>
           <option value="all">All reviews</option>
         </NativeSelect>
       </div>
@@ -90,19 +118,44 @@ function ReviewsInner() {
                     <span className="font-semibold text-ink">{r.title}</span>
                     {r.is_approved ? (
                       <Badge className="bg-green-100 text-green-700">Approved</Badge>
+                    ) : r.is_rejected ? (
+                      <Badge className="bg-red-100 text-red-700">Rejected</Badge>
                     ) : (
                       <Badge className="bg-amber-100 text-amber-700">Pending</Badge>
                     )}
                   </div>
                   <p className="mt-1.5 text-sm text-muted">{r.body}</p>
+                  {r.images.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {r.images.map((img) => (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          key={img.id}
+                          src={img.view_url}
+                          alt=""
+                          className="size-14 rounded-md border border-line object-cover"
+                        />
+                      ))}
+                    </div>
+                  )}
                   <p className="mt-2 text-xs text-faint">
                     {r.customer_name} · {r.product_name ?? "Product"} · {formatDate(r.created_at)}
                   </p>
                 </div>
-                {!r.is_approved && can("catalog.edit_product") && (
-                  <Button size="sm" loading={busyId === r.id} onClick={() => approve(r)}>
-                    <Check className="size-4" />Approve
-                  </Button>
+                {!r.is_approved && !r.is_rejected && can("catalog.edit_product") && (
+                  <div className="flex gap-2">
+                    <Button size="sm" loading={busyId === r.id} onClick={() => approve(r)}>
+                      <Check className="size-4" />Approve
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      loading={busyId === r.id}
+                      onClick={() => reject(r)}
+                    >
+                      <X className="size-4" />Reject
+                    </Button>
+                  </div>
                 )}
               </div>
             </Card>

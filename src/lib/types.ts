@@ -298,6 +298,15 @@ export interface ProductDetail {
   updated_at: string;
 }
 
+export interface ReviewImage {
+  id: string;
+  s3_key: string;
+  view_url?: string;
+  file_name?: string;
+  mime_type?: string;
+  sort_order?: number;
+}
+
 export interface Review {
   id: string;
   product: string; // product id
@@ -307,6 +316,8 @@ export interface Review {
   body: string;
   customer_name: string;
   is_approved: boolean;
+  is_rejected: boolean;
+  images: ReviewImage[];
   created_at: string;
 }
 

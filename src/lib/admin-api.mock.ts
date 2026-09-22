@@ -972,14 +972,16 @@ export async function updateCollection(
 /* -------------------------------------------------------------------------- */
 
 export async function listReviews(
-  params: { approved?: boolean } = {},
+  params: { approved?: boolean; rejected?: boolean } = {},
 ): Promise<Review[]> {
   await tick();
   requirePermission("catalog.view_product");
-  // TODO(backend): fetch(`/catalog/staff/reviews/?approved=...`)
+  // TODO(backend): fetch(`/catalog/staff/reviews/?approved=...&rejected=...`)
   let list = get("reviews").slice();
   if (params.approved != null)
     list = list.filter((r) => r.is_approved === params.approved);
+  if (params.rejected != null)
+    list = list.filter((r) => r.is_rejected === params.rejected);
   list.sort((a, b) => b.created_at.localeCompare(a.created_at));
   return clone(list);
 }
@@ -991,7 +993,21 @@ export async function approveReview(id: string): Promise<Review> {
   const reviews = get("reviews");
   const i = reviews.findIndex((r) => r.id === id);
   if (i === -1) throw new ApiError("Review not found", 404);
-  const updated = { ...reviews[i], is_approved: true };
+  const updated = { ...reviews[i], is_approved: true, is_rejected: false };
+  const next = reviews.slice();
+  next[i] = updated;
+  set("reviews", next);
+  return clone(updated);
+}
+
+export async function rejectReview(id: string): Promise<Review> {
+  await tick(true);
+  requirePermission("catalog.edit_product");
+  // TODO(backend): fetch(`/catalog/staff/reviews/${id}/reject/`, { method:"PATCH" })
+  const reviews = get("reviews");
+  const i = reviews.findIndex((r) => r.id === id);
+  if (i === -1) throw new ApiError("Review not found", 404);
+  const updated = { ...reviews[i], is_approved: false, is_rejected: true };
   const next = reviews.slice();
   next[i] = updated;
   set("reviews", next);

@@ -102,6 +102,7 @@ export const updateCollection = USE_MOCKS ? mock.updateCollection : real.updateC
 /* Reviews */
 export const listReviews = USE_MOCKS ? mock.listReviews : real.listReviews;
 export const approveReview = USE_MOCKS ? mock.approveReview : real.approveReview;
+export const rejectReview = USE_MOCKS ? mock.rejectReview : real.rejectReview;
 
 /* Suppliers */
 export const listSuppliers = USE_MOCKS ? mock.listSuppliers : real.listSuppliers;

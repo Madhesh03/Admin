@@ -52,7 +52,7 @@ function reviewParams(filter: Filter): { approved?: boolean; rejected?: boolean 
 
 function ReviewsInner() {
   const { can } = useAuth();
-  const [filter, setFilter] = React.useState<Filter>("pending");
+  const [filter, setFilter] = React.useState<Filter>("all");
   const { data, loading, error, reload } = useAsync<Review[]>(
     () => listReviews(reviewParams(filter)),
     [filter],
@@ -91,7 +91,7 @@ function ReviewsInner() {
 
   return (
     <div>
-      <PageHeader title="Reviews" description="Moderate customer reviews before they appear on the storefront." />
+      <PageHeader title="Reviews" description="Reviews go live on the storefront as soon as they're posted. Reject any that shouldn't stay up." />
       <div className="mb-4 max-w-[200px]">
         <NativeSelect value={filter} onChange={(e) => setFilter(e.target.value as Filter)}>
           <option value="pending">Pending approval</option>

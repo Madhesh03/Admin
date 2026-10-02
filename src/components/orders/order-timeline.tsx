@@ -1,17 +1,22 @@
 import { Check } from "lucide-react";
 import { orderSteps } from "@/lib/derive";
-import type { OrderStatus } from "@/lib/types";
+import type { OrderStatus, PaymentStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /** Progress timeline derived from the order's current status (§ derive.orderSteps). */
-export function OrderTimeline({ status }: { status: OrderStatus }) {
-  const steps = orderSteps(status);
-  const terminal = status === "cancelled" || status === "refunded";
+export function OrderTimeline({
+  status,
+  paymentStatus,
+}: {
+  status: OrderStatus;
+  paymentStatus?: PaymentStatus | null;
+}) {
+  const steps = orderSteps(status, paymentStatus);
   return (
     <ol className="space-y-0">
       {steps.map((s, i) => {
         const isLast = i === steps.length - 1;
-        const danger = terminal && isLast;
+        const danger = s.danger ?? false;
         return (
           <li key={s.status} className="flex gap-3">
             <div className="flex flex-col items-center">

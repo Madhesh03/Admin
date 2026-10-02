@@ -130,7 +130,7 @@ function OrderDetail({
 
         <Card>
           <CardHeader><CardTitle>Timeline</CardTitle></CardHeader>
-          <CardBody><OrderTimeline status={order.status} /></CardBody>
+          <CardBody><OrderTimeline status={order.status} paymentStatus={order.payment_status} /></CardBody>
         </Card>
 
         {order.notes && (

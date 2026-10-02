@@ -7,6 +7,7 @@ import {
   type MetalType,
   type Order,
   type OrderStatus,
+  type PaymentStatus,
   type ProductDetail,
   type ProductList,
   type PurchaseOrder,
@@ -170,7 +171,17 @@ export interface OrderStep {
   label: string;
   done: boolean;
   current: boolean;
+  /** Render this step as a failure/terminal (red) rather than a pending grey step. */
+  danger?: boolean;
 }
+
+/** Payment statuses that mean money was actually collected (vs. created/failed). */
+const PAID_PAYMENT_STATUSES: PaymentStatus[] = [
+  "authorized",
+  "captured",
+  "refunded",
+  "partially_refunded",
+];
 
 const FLOW_LABEL: Record<OrderStatus, string> = {
   pending: "Placed",
@@ -186,22 +197,49 @@ const FLOW_LABEL: Record<OrderStatus, string> = {
 /**
  * Build a display timeline from an order's current status. Cancelled/returned/
  * refunded are terminal branches shown as a single trailing step.
+ *
+ * For cancelled orders we must NOT assume payment happened — an order can be
+ * cancelled from `pending` (payment failed, or the payment window expired) and
+ * never reach `paid`. `paymentStatus` tells us whether money was actually
+ * collected, so staff can see from the timeline *why* it was cancelled instead
+ * of a misleading green "Paid" check.
  */
-export function orderSteps(status: OrderStatus): OrderStep[] {
+export function orderSteps(
+  status: OrderStatus,
+  paymentStatus?: PaymentStatus | null,
+): OrderStep[] {
   if (status === "cancelled" || status === "returned" || status === "refunded") {
+    const reachedPaid =
+      status === "refunded" ||
+      status === "returned" || // both imply a delivered (therefore paid) order
+      (paymentStatus != null && PAID_PAYMENT_STATUSES.includes(paymentStatus));
+
     const base = ORDER_FLOW.map((s) => ({
       status: s,
       label: FLOW_LABEL[s],
-      done: status === "refunded" || status === "returned", // reached delivery first
+      done: false,
       current: false,
-    }));
-    // For cancelled we don't know how far it went; show only up to processing done.
+    })) as OrderStep[];
+
     if (status === "cancelled") {
-      base.forEach((step, i) => (step.done = i <= 1));
+      base[0].done = true; // "Placed" always happened
+      if (reachedPaid) {
+        base[1].done = true; // paid, then cancelled (e.g. admin cancel + refund)
+      } else {
+        // Never paid: relabel the "Paid" step to reflect what stopped the order.
+        base[1].label =
+          paymentStatus === "failed" ? "Payment failed" : "Payment not completed";
+        base[1].danger = paymentStatus === "failed";
+      }
+    } else {
+      base.forEach((step) => (step.done = true)); // returned/refunded: delivered first
     }
+
+    // Trailing terminal step — red for cancelled/refunded (matches prior behaviour).
+    const trailingDanger = status === "cancelled" || status === "refunded";
     return [
       ...base,
-      { status, label: FLOW_LABEL[status], done: true, current: true },
+      { status, label: FLOW_LABEL[status], done: true, current: true, danger: trailingDanger },
     ];
   }
 

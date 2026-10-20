@@ -21,14 +21,18 @@ import {
   DIMENSION_UNITS,
   METAL_LABEL,
   METAL_TYPES,
+  PRODUCT_TAGS,
+  PRODUCT_TAG_LABEL,
   STOCK_TYPES,
   titleCase,
+  toProductTag,
   type Category,
   type Collection,
   type DimensionUnit,
   type MetalType,
   type ProductDetail,
   type ProductStatus,
+  type ProductTag,
   type StockType,
 } from "@/lib/types";
 import { useAsync } from "@/lib/use-async";
@@ -71,7 +75,7 @@ interface FormState {
   care_instruction: string;
   is_featured: boolean;
   is_gift_hamper: boolean;
-  tags: string;
+  tag: ProductTag | "";
   stones: Stone[];
   certs: Cert[];
 }
@@ -85,7 +89,7 @@ function toState(p?: ProductDetail): FormState {
       dimensions: [],
       variant_label: "", size_unit: "", variants: [],
       care_instruction: "", is_featured: false, is_gift_hamper: false,
-      tags: "", stones: [], certs: [],
+      tag: "", stones: [], certs: [],
     };
   return {
     name: p.name,
@@ -118,7 +122,7 @@ function toState(p?: ProductDetail): FormState {
     care_instruction: p.care_instruction,
     is_featured: p.is_featured,
     is_gift_hamper: p.is_gift_hamper,
-    tags: p.tags.join(", "),
+    tag: toProductTag(p.tags),
     stones: p.stone_details.map((s) => ({ type: s.type, weight: s.weight, quality: s.quality, count: String(s.count) })),
     certs: Object.entries(p.certificate_details).map(([key, value]) => ({ key, value })),
   };
@@ -248,7 +252,7 @@ export function ProductForm({
       care_instruction: form.care_instruction,
       is_featured: form.is_featured,
       is_gift_hamper: form.is_gift_hamper,
-      tags: form.tags.split(",").map((t) => t.trim()).filter(Boolean),
+      tags: form.tag ? [form.tag] : [],
     };
   }
 
@@ -550,7 +554,7 @@ export function ProductForm({
               )}
             </div>
 
-            <Field label="Tags" htmlFor="tags" hint="Comma-separated" className="sm:col-span-2"><Input id="tags" value={form.tags} onChange={(e) => set("tags", e.target.value)} placeholder="new, bestseller" /></Field>
+            <Field label="Tag" htmlFor="tags" hint="Drives the storefront badge/section" className="sm:col-span-2"><NativeSelect id="tags" value={form.tag} onChange={(e) => set("tag", e.target.value as ProductTag | "")}><option value="">None</option>{PRODUCT_TAGS.map((t) => (<option key={t} value={t}>{PRODUCT_TAG_LABEL[t]}</option>))}</NativeSelect></Field>
             <Field label="Care instructions" htmlFor="care" className="sm:col-span-2"><Textarea id="care" value={form.care_instruction} onChange={(e) => set("care_instruction", e.target.value)} /></Field>
           </CardBody>
         </Card>

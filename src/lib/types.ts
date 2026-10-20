@@ -735,32 +735,6 @@ export const PRODUCT_STATUSES: ProductStatus[] = [
   "archived",
 ];
 
-/**
- * The only product tags the storefront recognises — each drives a merchandising
- * bucket/badge there (see sois-frontend's TAG_ALIASES). Staff pick from these
- * rather than typing free text, so a tag always lands a product in a real
- * section instead of silently doing nothing on the shop. Stored values are the
- * normalised strings the storefront matches on; "sale" is the default choice.
- */
-export const PRODUCT_TAGS = ["sale", "bestseller", "new"] as const;
-export type ProductTag = (typeof PRODUCT_TAGS)[number];
-export const PRODUCT_TAG_LABEL: Record<ProductTag, string> = {
-  sale: "Sale",
-  bestseller: "Best Seller",
-  new: "New",
-};
-/** Pick the first supported tag off a product's list (storefront shows one badge). */
-export function toProductTag(tags: readonly string[] | undefined): ProductTag | "" {
-  const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]/g, "");
-  for (const t of tags ?? []) {
-    const n = norm(t);
-    if (n === "sale" || n === "onsale") return "sale";
-    if (n === "bestseller" || n === "bestsellers" || n === "bestselling") return "bestseller";
-    if (n === "new" || n === "newarrival" || n === "newarrivals") return "new";
-  }
-  return "";
-}
-
 export const ORDER_STATUSES: OrderStatus[] = [
   "pending",
   "paid",

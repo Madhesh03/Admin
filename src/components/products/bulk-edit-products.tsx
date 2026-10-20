@@ -7,14 +7,11 @@ import {
   METAL_LABEL,
   METAL_TYPES,
   PRODUCT_STATUSES,
-  PRODUCT_TAGS,
-  PRODUCT_TAG_LABEL,
   titleCase,
   type Category,
   type Collection,
   type MetalType,
   type ProductStatus,
-  type ProductTag,
 } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent } from "@/components/ui/dialog";
@@ -60,7 +57,7 @@ export function BulkEditProductsDialog({
   const [metal, setMetal] = React.useState<string>(KEEP);
   const [featured, setFeatured] = React.useState<string>(KEEP);
   const [tagMode, setTagMode] = React.useState<TagMode>("none");
-  const [tag, setTag] = React.useState<ProductTag>("sale");
+  const [tags, setTags] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
 
@@ -77,7 +74,7 @@ export function BulkEditProductsDialog({
     setMetal(KEEP);
     setFeatured(KEEP);
     setTagMode("none");
-    setTag("sale");
+    setTags("");
     setError(null);
   }, [open]);
 
@@ -111,7 +108,12 @@ export function BulkEditProductsDialog({
     if (tagMode === "clear") {
       changes.tags = [];
     } else if (tagMode === "replace") {
-      changes.tags = [tag];
+      const list = tags.split(",").map((t) => t.trim()).filter(Boolean);
+      if (!list.length) {
+        setError("Enter at least one tag, or choose “Clear all”.");
+        return null;
+      }
+      changes.tags = list;
     }
 
     if (Object.keys(changes).length === 0) {
@@ -251,8 +253,8 @@ export function BulkEditProductsDialog({
             </div>
 
             <Field
-              label="Tag"
-              hint="Replacing sets each product’s tag to the one you pick."
+              label="Tags"
+              hint="Replacing overwrites each product’s existing tags."
             >
               <div className="flex gap-2">
                 <NativeSelect
@@ -265,15 +267,11 @@ export function BulkEditProductsDialog({
                   <option value="clear">Clear all</option>
                 </NativeSelect>
                 {tagMode === "replace" && (
-                  <NativeSelect
-                    className="w-auto min-w-[150px]"
-                    value={tag}
-                    onChange={(e) => setTag(e.target.value as ProductTag)}
-                  >
-                    {PRODUCT_TAGS.map((t) => (
-                      <option key={t} value={t}>{PRODUCT_TAG_LABEL[t]}</option>
-                    ))}
-                  </NativeSelect>
+                  <Input
+                    value={tags}
+                    onChange={(e) => setTags(e.target.value)}
+                    placeholder="new, bestseller"
+                  />
                 )}
               </div>
             </Field>

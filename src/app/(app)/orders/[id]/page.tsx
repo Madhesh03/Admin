@@ -3,8 +3,8 @@
 import * as React from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { PackageX, User, Truck } from "lucide-react";
-import { getOrder, updateOrderStatus } from "@/lib/admin-api";
+import { PackageX, User, Truck, FileText, Download } from "lucide-react";
+import { getOrder, getOrderInvoice, updateOrderStatus } from "@/lib/admin-api";
 import { orderCustomerName } from "@/lib/derive";
 import {
   ORDER_TRANSITIONS,
@@ -42,7 +42,14 @@ export default function OrderDetailPage() {
         title={data ? data.order_number : "Order"}
         description={data ? formatDateTime(data.created_at) : undefined}
         backHref="/orders"
-        actions={data ? <OrderStatusBadge status={data.status} /> : undefined}
+        actions={
+          data ? (
+            <div className="flex items-center gap-2">
+              <InvoiceButtons orderId={data.id} status={data.status} />
+              <OrderStatusBadge status={data.status} />
+            </div>
+          ) : undefined
+        }
       />
       {loading ? (
         <Card><LoadingState label="Loading order…" /></Card>
@@ -54,6 +61,42 @@ export default function OrderDetailPage() {
         <OrderDetail order={data} onChange={setData} onReload={reload} />
       )}
     </RequirePermission>
+  );
+}
+
+/** View / Download the GST tax invoice. Only paid-or-later orders have one;
+ *  links are short-lived presigned URLs, so fetch them on click. */
+function InvoiceButtons({ orderId, status }: { orderId: string; status: Order["status"] }) {
+  const [busy, setBusy] = React.useState<"view" | "download" | null>(null);
+  if (status === "pending" || status === "cancelled") return null;
+
+  const open = async (kind: "view" | "download") => {
+    setBusy(kind);
+    // Open the tab synchronously (async window.open gets popup-blocked), then
+    // point it at the presigned URL once we have it.
+    const tab = window.open("", "_blank");
+    try {
+      const links = await getOrderInvoice(orderId);
+      const url = kind === "view" ? links.view_url : links.download_url;
+      if (tab) tab.location.href = url;
+      else window.location.href = url;
+    } catch (e) {
+      tab?.close();
+      toast.error(e instanceof Error ? e.message : "Couldn't load the invoice.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <>
+      <Button variant="secondary" loading={busy === "view"} onClick={() => open("view")}>
+        <FileText className="size-4" />View invoice
+      </Button>
+      <Button variant="secondary" loading={busy === "download"} onClick={() => open("download")}>
+        <Download className="size-4" />Download
+      </Button>
+    </>
   );
 }
 

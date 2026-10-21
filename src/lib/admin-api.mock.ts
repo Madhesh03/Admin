@@ -1510,6 +1510,13 @@ function sortOrders(list: Order[], ordering: OrderOrdering): void {
   });
 }
 
+export async function getOrderInvoice(
+  _id: string,
+): Promise<{ invoice_number: string; view_url: string; download_url: string }> {
+  await tick(true);
+  throw new Error("Invoices are not available in demo mode.");
+}
+
 export async function getOrder(id: string): Promise<Order | null> {
   await tick();
   requirePermission("orders.view_order");

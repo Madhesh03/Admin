@@ -127,6 +127,7 @@ export const adjustStock = USE_MOCKS ? mock.adjustStock : real.adjustStock;
 /* Orders */
 export const listOrders = USE_MOCKS ? mock.listOrders : real.listOrders;
 export const getOrder = USE_MOCKS ? mock.getOrder : real.getOrder;
+export const getOrderInvoice = USE_MOCKS ? mock.getOrderInvoice : real.getOrderInvoice;
 export const updateOrderStatus = USE_MOCKS ? mock.updateOrderStatus : real.updateOrderStatus;
 
 /* Returns */

@@ -388,6 +388,18 @@ export function listOrders(params: ListOrdersParams = {}): Promise<Page<Order>> 
   });
 }
 
+export type OrderInvoiceLinks = {
+  invoice_number: string;
+  view_url: string;
+  download_url: string;
+};
+
+/** Presigned view/download links for the order's GST tax invoice. 404s
+ *  (ApiError) until the order is paid. */
+export function getOrderInvoice(id: string): Promise<OrderInvoiceLinks> {
+  return apiGet<OrderInvoiceLinks>(`/orders/staff/${id}/invoice/`);
+}
+
 export async function getOrder(id: string): Promise<Order | null> {
   try {
     return await apiGet<Order>(`/orders/staff/${id}/`);

@@ -60,6 +60,34 @@ export function fileToDataUrl(file: File): Promise<string> {
 }
 
 /**
+ * Escape a single CSV cell: wrap in quotes when it contains a comma, quote,
+ * or newline, doubling any embedded quotes (RFC 4180). null/undefined → "".
+ */
+export function csvCell(value: unknown): string {
+  const s = value == null ? "" : String(value);
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+/** Build a CSV document from a header row and value rows. */
+export function toCsv(headers: string[], rows: unknown[][]): string {
+  return [headers, ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n");
+}
+
+/** Trigger a browser download of `content` as a file named `filename`. */
+export function downloadFile(content: string, filename: string, type = "text/csv;charset=utf-8") {
+  // Prepend a UTF-8 BOM so Excel reads non-ASCII (₹, names) correctly.
+  const blob = new Blob(["﻿", content], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+/**
  * Resolve a stored media reference to a displayable URL.
  *   • data:/blob:/http(s) values (mock uploads, pasted URLs) → returned as-is
  *   • bare S3 keys (real backend, e.g. "tenants/…/x.webp") → prefixed with

@@ -764,6 +764,8 @@ export function listCustomers(
   return apiGetList<Customer>("/staff/customers/", {
     search: params.search,
     has_orders: params.has_orders || undefined,
+    created_from: params.created_from,
+    created_to: params.created_to,
     sort: params.sort,
     page: params.page,
     page_size: params.page_size,

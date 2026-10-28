@@ -9,6 +9,7 @@ import { useAsync, useDebouncedValue } from "@/lib/use-async";
 import { cn, formatDate, formatPrice } from "@/lib/utils";
 import { RequirePermission } from "@/components/permission-gate";
 import { PageHeader } from "@/components/layout/page-header";
+import { ExportCustomersDialog } from "@/components/customers/export-dialog";
 import { Card, CardBody } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input, NativeSelect } from "@/components/ui/input";
@@ -58,7 +59,11 @@ function CustomersInner() {
 
   return (
     <div>
-      <PageHeader title="Customers" description="Every registered customer — profiles, spend, and order history." />
+      <PageHeader
+        title="Customers"
+        description="Every registered customer — profiles, spend, and order history."
+        actions={<ExportCustomersDialog search={debounced} hasOrders={hasOrders} sort={sort} />}
+      />
 
       <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {summary.loading ? (

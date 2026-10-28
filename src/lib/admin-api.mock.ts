@@ -2512,8 +2512,12 @@ export type CustomerSort =
 export interface ListCustomersParams {
   search?: string;
   has_orders?: "" | "true" | "false";
+  /** Registration-date range (YYYY-MM-DD), inclusive. */
+  created_from?: string;
+  created_to?: string;
   sort?: CustomerSort;
   page?: number;
+  /** page_size=0 → unpaginated (returns every match); used by CSV export. */
   page_size?: number;
 }
 
@@ -2580,7 +2584,13 @@ export async function listCustomers(
     );
   if (params.has_orders === "true") customers = customers.filter((c) => c.order_count > 0);
   else if (params.has_orders === "false") customers = customers.filter((c) => c.order_count === 0);
+  if (params.created_from) customers = customers.filter((c) => c.created_at.slice(0, 10) >= params.created_from!);
+  if (params.created_to) customers = customers.filter((c) => c.created_at.slice(0, 10) <= params.created_to!);
   customers.sort(CUSTOMER_SORTS[params.sort ?? "last_order_date"]);
+  // page_size=0 → unpaginated: return the full matching set in one "page".
+  if (params.page_size === 0) {
+    return clone({ items: customers, meta: { total: customers.length, page: 1, page_size: customers.length } });
+  }
   return clone(paginate(customers, params.page, params.page_size));
 }
 
